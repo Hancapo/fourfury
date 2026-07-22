@@ -9,6 +9,8 @@
 - IMG3: reading, searching, extraction, creation, and writing.
 - WPL: typed reading and writing for instances, garages, parked cars, culls, StrBig records, LOD culls, zones, and blocks.
 - IDE: lossless reading and writing of sectioned definition files, including comments, blank lines, and nested MLO tokens.
+- `materials.dat`: typed physical-material catalogs with names, FX groups, friction, elasticity, density, grip, combustion, and behavior flags.
+- WBN: typed RSC5 collision bounds, composites, quantized geometry, resolved physical materials, polygons, and BVH trees, with lossless fixed-size editing.
 - Encrypted stock archives: automatic GTA IV 16-pass AES-256 ECB decryption using the embedded, SHA-1-verified game key.
 - RSC5 resources inside RPF and IMG archives: resource headers and flags are preserved, and trailing sector padding after the zlib stream is removed when extracting from IMG archives.
 
@@ -76,6 +78,38 @@ wpl.save("example.wpl")
 
 The WPL writer preserves trailing bytes such as the sector padding found in some stock files. The IDE writer preserves original lines byte-for-byte until their parsed values are modified.
 
+## Collision bounds
+
+WBN files can be loaded directly after extraction from an IMG entry. Composite children, transforms, bounding boxes, decoded vertices, polygon adjacency, material behavior flags, and BVH nodes are exposed with semantic names:
+
+```python
+from fourfury import ImgArchive, MaterialCatalog, WbnDocument, WbnMaterialFlags
+
+materials = MaterialCatalog.from_game(game)
+
+with ImgArchive.from_path(game / "pc/data/maps/east/bronx_e.img") as archive:
+    entry = archive.find_entry("bronx_e_1.wbn")
+    bounds = WbnDocument.from_bytes(entry.read(), name=entry.name, materials=materials)
+
+for geometry in bounds.geometries:
+    print(len(geometry.vertices), len(geometry.polygons))
+    print(geometry.decoded_vertices[0])
+    for material in geometry.materials:
+        print(material.material_id, material.name, material.definition.friction)
+        if material.flags & WbnMaterialFlags.SEE_THROUGH:
+            print("see-through collision material", material.material_id)
+
+    for polygon in geometry.polygons:
+        physical_material = geometry.material_for_polygon(polygon)
+        print(physical_material.name, physical_material.definition.fx_group)
+
+# Existing values can be edited without rebuilding resource pointers.
+geometry.materials[0].flags |= WbnMaterialFlags.BLOCK_CLIMB
+bounds.save("edited.wbn")
+```
+
+The writer preserves the original compressed resource byte-for-byte when nothing changes. It supports edits that keep array counts fixed; adding or removing bounds, vertices, polygons, materials, or BVH nodes requires pointer relocation and is rejected explicitly.
+
 ### WPL instance flags
 
 Instance records expose semantic fields instead of anonymous integers:
@@ -116,4 +150,5 @@ print(instance.lod_distance)  # -1.0 uses the model's IDE draw distance
 - RPF3 writing is not implemented yet; audio RPF3 archives are currently read-only.
 - RPF3 names are not stored as text in the archive. The API preserves `name_hash` and uses its hexadecimal representation when no external name dictionary is available.
 - IMG3 archives are flat and cannot contain internal directories.
-- Asset formats such as `WDR`, `WTD`, `WBN`, and `SCO` are not implemented yet.
+- Asset formats such as `WDR`, `WTD`, and `SCO` are not implemented yet.
+- WBN sphere, capsule, and box records currently expose their shared bound metadata but not every type-specific trailing field.

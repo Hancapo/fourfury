@@ -1,6 +1,14 @@
 from .crypto import GTAIVCrypto, GTAIV_AES_KEY, GTAIV_KEY_SHA1, extract_aes_key
 from .img import IMG3_ENTRY_SIZE, IMG3_MAGIC, IMG3_VERSION, ImgArchive, ImgEntry, create_img, load_img
 from .ide import IdeDocument, IdeEntry, IdeLine, create_ide, load_ide
+from .materials import (
+    MATERIALS_RELATIVE_PATH,
+    MATERIALS_VERSION,
+    MaterialCatalog,
+    MaterialDefinition,
+    MaterialFlags,
+    load_materials,
+)
 from .rpf import (
     RPF2_MAGIC,
     RPF3_MAGIC,
@@ -12,6 +20,41 @@ from .rpf import (
     RpfFileEntry,
     create_rpf,
     load_rpf,
+)
+from .rsc import (
+    RSC5_HEADER_SIZE,
+    RSC5_MAGIC,
+    RSC5_PHYSICAL_BASE,
+    RSC5_VIRTUAL_BASE,
+    Rsc5Resource,
+    rsc5_physical_size,
+    rsc5_pointer_offset,
+    rsc5_virtual_size,
+)
+from .wbn import (
+    WBN_BOUND_SIZE,
+    WBN_BVH_GEOMETRY_SIZE,
+    WBN_COMPOSITE_SIZE,
+    WBN_GEOMETRY_SIZE,
+    WBN_RESOURCE_VERSION,
+    WbnAabb,
+    WbnBound,
+    WbnBoundType,
+    WbnBvhGeometry,
+    WbnBvhNode,
+    WbnBvhSubTree,
+    WbnBvhTree,
+    WbnComposite,
+    WbnDocument,
+    WbnGeometry,
+    WbnMaterial,
+    WbnMaterialFlags,
+    WbnMatrix,
+    WbnPolygon,
+    WbnVector3,
+    WbnVector4,
+    WbnVertex,
+    load_wbn,
 )
 from .wpl import (
     WPL_INSTANCE_FLAG_INFO,
@@ -40,11 +83,20 @@ __version__ = "0.1.0"
 __all__ = [
     "GTAIVCrypto", "GTAIV_AES_KEY", "GTAIV_KEY_SHA1", "IMG3_ENTRY_SIZE", "IMG3_MAGIC",
     "IMG3_VERSION", "IdeDocument", "IdeEntry", "IdeLine", "ImgArchive", "ImgEntry",
-    "RPF2_MAGIC", "RPF_ENCRYPTED", "RPF3_MAGIC", "RPF_HEADER_SIZE", "RpfArchive",
-    "RpfDirectoryEntry", "RpfEntry", "RpfFileEntry", "WPL_HEADER_SIZE",
+    "MATERIALS_RELATIVE_PATH", "MATERIALS_VERSION", "MaterialCatalog", "MaterialDefinition",
+    "MaterialFlags",
+    "RPF2_MAGIC", "RPF_ENCRYPTED", "RPF3_MAGIC", "RPF_HEADER_SIZE", "RSC5_HEADER_SIZE",
+    "RSC5_MAGIC", "RSC5_PHYSICAL_BASE", "RSC5_VIRTUAL_BASE", "RpfArchive",
+    "RpfDirectoryEntry", "RpfEntry", "RpfFileEntry", "Rsc5Resource", "WBN_BOUND_SIZE",
+    "WBN_BVH_GEOMETRY_SIZE", "WBN_COMPOSITE_SIZE", "WBN_GEOMETRY_SIZE",
+    "WBN_RESOURCE_VERSION", "WPL_HEADER_SIZE", "WbnAabb", "WbnBound", "WbnBoundType",
+    "WbnBvhGeometry", "WbnBvhNode", "WbnBvhSubTree", "WbnBvhTree", "WbnComposite",
+    "WbnDocument", "WbnGeometry", "WbnMaterial", "WbnMaterialFlags", "WbnMatrix",
+    "WbnPolygon", "WbnVector3", "WbnVector4", "WbnVertex",
     "WPL_INSTANCE_FLAG_INFO", "WPL_SECTION_SIZES", "WPL_VERSION", "WplBlock", "WplCull",
     "WplDocument", "WplGarage", "WplInstance", "WplInstanceFlagInfo", "WplInstanceFlags",
     "WplLodCull", "WplParkedCar", "WplStrBig", "WplTimeCycleModifier", "WplZone",
     "create_ide", "create_img", "create_rpf", "create_wpl", "explain_instance_flags",
-    "extract_aes_key", "load_ide", "load_img", "load_rpf", "load_wpl",
+    "extract_aes_key", "load_ide", "load_img", "load_materials", "load_rpf", "load_wbn", "load_wpl",
+    "rsc5_physical_size", "rsc5_pointer_offset", "rsc5_virtual_size",
 ]
