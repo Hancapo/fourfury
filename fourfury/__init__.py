@@ -65,8 +65,10 @@ from .nod import (
     NodNodeFlags,
     NodNodeKind,
     NodVector3,
+    combine_nod_graphs,
     explain_node_flags,
     load_nod,
+    load_nod_graph,
 )
 from .path import (
     PathEdge,
@@ -280,9 +282,9 @@ __all__ = [
     "WPL_INSTANCE_FLAG_INFO", "WPL_SECTION_SIZES", "WPL_VERSION", "WplBlock", "WplCull",
     "WplDocument", "WplGarage", "WplInstance", "WplInstanceFlagInfo", "WplInstanceFlags",
     "WplLodCull", "WplParkedCar", "WplStrBig", "WplTimeCycleModifier", "WplZone",
-    "combine_path_graphs", "create_gtxd", "create_ide", "create_img", "create_rpf", "create_wpl", "joaat",
+    "combine_nod_graphs", "combine_path_graphs", "create_gtxd", "create_ide", "create_img", "create_rpf", "create_wpl", "joaat",
     "explain_instance_flags", "explain_node_flags",
-    "extract_aes_key", "load_ide", "load_img", "load_materials", "load_nod", "load_rpf", "load_wbn",
+    "extract_aes_key", "load_ide", "load_img", "load_materials", "load_nod", "load_nod_graph", "load_rpf", "load_wbn",
     "load_gtxd", "load_wbd", "load_wdr", "load_wnv", "load_wpl", "load_wtd", "read_rsc5_texture_dictionary",
     "rsc5_physical_size", "rsc5_pointer_offset", "rsc5_virtual_size",
 ]
