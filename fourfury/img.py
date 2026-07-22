@@ -107,7 +107,7 @@ class ImgArchive:
         prefix = header[:16]
         if self.encrypted:
             if self.crypto is None:
-                raise ValueError("encrypted IMG3 archive requires GTAIVCrypto")
+                self.crypto = GTAIVCrypto()
             prefix = self.crypto.decrypt(prefix)
         magic, version, count, table_size = struct.unpack("<4I", prefix)
         entry_size, self.unknown = struct.unpack_from("<2H", header, 16)

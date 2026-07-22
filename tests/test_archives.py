@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import struct
 import unittest
 import zlib
 
-from fourfury import GTAIVCrypto, ImgArchive, RpfArchive
+from fourfury import GTAIVCrypto, GTAIV_AES_KEY, GTAIV_KEY_SHA1, ImgArchive, RpfArchive
 
 
 class ArchiveTests(unittest.TestCase):
@@ -75,6 +76,10 @@ class ArchiveTests(unittest.TestCase):
     def test_crypto_rejects_wrong_key_length(self) -> None:
         with self.assertRaisesRegex(ValueError, "32 bytes"):
             GTAIVCrypto(b"short")
+
+    def test_default_crypto_uses_verified_embedded_key(self) -> None:
+        self.assertEqual(GTAIVCrypto().aes_key, GTAIV_AES_KEY)
+        self.assertEqual(hashlib.sha1(GTAIV_AES_KEY).digest(), GTAIV_KEY_SHA1)
 
 
 if __name__ == "__main__":

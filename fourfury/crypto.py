@@ -10,6 +10,9 @@ from typing import Callable, Final
 
 
 GTAIV_KEY_SHA1: Final[bytes] = bytes.fromhex("DEA375EF1E6EF2223A1221C2C575C47BF17EFA5E")
+GTAIV_AES_KEY: Final[bytes] = bytes.fromhex(
+    "1AB56FED7EC3FF01227B691533975DCE47D769653FF775426A96CD6D5307565D"
+)
 _KNOWN_KEY_OFFSETS: Final[tuple[int, ...]] = (
     0xA94204, 0xB607C4, 0xB56BC4, 0xB75C9C, 0xB7AEF4,
     0xBE6540, 0xBE7540, 0xC95FD8, 0xC5B33C, 0xC5B73C,
@@ -133,7 +136,7 @@ class _WindowsAesEcbDecryptor:
 
 @dataclass(slots=True)
 class GTAIVCrypto:
-    aes_key: bytes
+    aes_key: bytes = GTAIV_AES_KEY
     _decrypt_once: Callable[[bytes], bytes] | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -160,4 +163,4 @@ class GTAIVCrypto:
         return prefix + data[aligned:]
 
 
-__all__ = ["GTAIVCrypto", "GTAIV_KEY_SHA1", "extract_aes_key"]
+__all__ = ["GTAIVCrypto", "GTAIV_AES_KEY", "GTAIV_KEY_SHA1", "extract_aes_key"]

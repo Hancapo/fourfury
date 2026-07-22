@@ -159,7 +159,7 @@ class RpfArchive:
             raise ValueError("truncated RPF table")
         if self.encrypted:
             if self.crypto is None:
-                raise ValueError("encrypted RPF archive requires GTAIVCrypto")
+                self.crypto = GTAIVCrypto()
             toc = self.crypto.decrypt(toc)
 
         names = toc[entry_count * _ENTRY_SIZE :]

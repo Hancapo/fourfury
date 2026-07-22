@@ -7,10 +7,10 @@
 - RPF2: reading, searching, extraction, creation, and writing.
 - Audio RPF3: reading and extraction. Names stored only as hashes are represented in hexadecimal.
 - IMG3: reading, searching, extraction, creation, and writing.
-- Encrypted stock archives: verified key extraction from the user's `GTAIV.exe` or `EFLC.exe`, with GTA IV's 16-pass AES-256 ECB decryption.
+- Encrypted stock archives: automatic GTA IV 16-pass AES-256 ECB decryption using the embedded, SHA-1-verified game key.
 - RSC5 resources inside RPF and IMG archives: resource headers and flags are preserved, and trailing sector padding after the zlib stream is removed when extracting from IMG archives.
 
-Archive writing is intentionally unencrypted. GTA IV accepts open modified archives, and this avoids distributing or persisting the game's encryption key.
+Archive writing is intentionally unencrypted because GTA IV accepts open modified archives. The embedded key is used only to read encrypted stock archives.
 
 ## Development installation
 
@@ -23,17 +23,15 @@ python -m unittest discover -s tests -v
 
 ```python
 from pathlib import Path
-from fourfury import GTAIVCrypto, ImgArchive, RpfArchive
+from fourfury import ImgArchive, RpfArchive
 
 game = Path(r"D:\Program Files (x86)\Steam\steamapps\common\Grand Theft Auto IV\GTAIV")
-crypto = GTAIVCrypto.from_game(game)
-
-with RpfArchive.from_path(game / "pc/data/game.rpf", crypto=crypto) as archive:
+with RpfArchive.from_path(game / "pc/data/game.rpf") as archive:
     entry = archive.find_entry("data/taskparams.txt")
     print(entry.read().decode("utf-8"))
     archive.extract("game-rpf")
 
-with ImgArchive.from_path(game / "common/data/cdimages/script.img", crypto=crypto) as archive:
+with ImgArchive.from_path(game / "common/data/cdimages/script.img") as archive:
     script = archive.find_entry("advanced_car_actions.sco")
     print(script.read()[:8])
     archive.extract("scripts")
@@ -54,6 +52,8 @@ img.save("scripts.img")
 ```
 
 The convenience APIs `RpfArchive.from_folder(...)`, `ImgArchive.from_folder(...)`, `load_rpf`, `load_img`, `create_rpf`, and `create_img` are also available.
+
+`GTAIVCrypto.from_game(...)` and `extract_aes_key(...)` remain available when an application wants to verify the embedded key against a local executable.
 
 ## Current limitations
 
