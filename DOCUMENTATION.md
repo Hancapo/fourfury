@@ -58,6 +58,11 @@ The native WDR decoder materializes vertex declarations as semantic columns. Par
 per vertex; the existing `vertices` property remains available and creates row-oriented
 `WdrVertex` objects lazily. `WdrDocument.to_model()` reads the columns directly.
 
+The native WBN decoder handles the fixed-size quantized vertex, polygon, BVH node,
+and BVH subtree records. Parsing still returns the same mutable `WbnVertex`,
+`WbnPolygon`, `WbnBvhNode`, and `WbnBvhSubTree` objects, so native acceleration does
+not change the public API or editing behavior.
+
 ## Development installation
 
 ```powershell

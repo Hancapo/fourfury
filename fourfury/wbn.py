@@ -11,6 +11,25 @@ from ._utils import atomic_write
 from .materials import MaterialCatalog, MaterialDefinition
 from .rsc import Rsc5Resource, rsc5_pointer_offset
 
+try:
+    from . import _native as _native_module
+except ImportError:
+    _native_module = None
+
+
+_native_decode_wbn_vertices = (
+    None if _native_module is None else getattr(_native_module, "decode_wbn_vertices", None)
+)
+_native_decode_wbn_polygons = (
+    None if _native_module is None else getattr(_native_module, "decode_wbn_polygons", None)
+)
+_native_decode_wbn_bvh_nodes = (
+    None if _native_module is None else getattr(_native_module, "decode_wbn_bvh_nodes", None)
+)
+_native_decode_wbn_bvh_subtrees = (
+    None if _native_module is None else getattr(_native_module, "decode_wbn_bvh_subtrees", None)
+)
+
 
 WBN_RESOURCE_VERSION = 0x20
 WBN_BOUND_SIZE = 0x80
@@ -565,6 +584,60 @@ class _WbnParser:
     def _optional_pointer(self, pointer: int, size: int, label: str) -> int | None:
         return None if pointer == 0 else self._pointer(pointer, size, label)
 
+    def _vertices(self, offset: int, count: int) -> list[WbnVertex]:
+        if _native_decode_wbn_vertices is None:
+            return [
+                WbnVertex.from_bytes(self.data, offset + index * 6)
+                for index in range(count)
+            ]
+        return [WbnVertex(*values) for values in _native_decode_wbn_vertices(self.data, offset, count)]
+
+    def _polygons(self, offset: int, count: int) -> list[WbnPolygon]:
+        if _native_decode_wbn_polygons is None:
+            return [
+                WbnPolygon.from_bytes(self.data, offset + index * 32)
+                for index in range(count)
+            ]
+        polygons: list[WbnPolygon] = []
+        for record in _native_decode_wbn_polygons(self.data, offset, count):
+            raw = bytes(record[5])
+            polygons.append(
+                WbnPolygon(
+                    WbnVector3(*record[0], _raw=raw[:12]),
+                    int(record[1]),
+                    float(record[2]),
+                    tuple(record[3]),
+                    tuple(record[4]),
+                    raw,
+                    int(record[6]),
+                    tuple(record[7]),
+                    tuple(record[8]),
+                )
+            )
+        return polygons
+
+    def _bvh_nodes(self, offset: int, count: int) -> list[WbnBvhNode]:
+        if _native_decode_wbn_bvh_nodes is None:
+            return [
+                WbnBvhNode.from_bytes(self.data, offset + index * 16)
+                for index in range(count)
+            ]
+        return [
+            WbnBvhNode(tuple(record[0]), tuple(record[1]), record[2], record[3], record[4])
+            for record in _native_decode_wbn_bvh_nodes(self.data, offset, count)
+        ]
+
+    def _bvh_subtrees(self, offset: int, count: int) -> list[WbnBvhSubTree]:
+        if _native_decode_wbn_bvh_subtrees is None:
+            return [
+                WbnBvhSubTree.from_bytes(self.data, offset + index * 16)
+                for index in range(count)
+            ]
+        return [
+            WbnBvhSubTree(tuple(record[0]), tuple(record[1]), record[2], record[3])
+            for record in _native_decode_wbn_bvh_subtrees(self.data, offset, count)
+        ]
+
     def _common(self, offset: int, bound_type: WbnBoundType) -> dict[str, object]:
         self._check(offset, WBN_BOUND_SIZE, "bound")
         flags, part_index, radius, world_radius = struct.unpack_from("<xBHff", self.data, offset + 4)
@@ -600,12 +673,10 @@ class _WbnParser:
         return {
             "quantum": WbnVector4.from_bytes(self.data, offset + 0x90),
             "quantization_offset": WbnVector4.from_bytes(self.data, offset + 0xA0),
-            "vertices": [WbnVertex.from_bytes(self.data, vertices_offset + index * 6) for index in range(vertex_count)],
-            "polygons": [WbnPolygon.from_bytes(self.data, polygons_offset + index * 32) for index in range(polygon_count)],
+            "vertices": self._vertices(vertices_offset, vertex_count),
+            "polygons": self._polygons(polygons_offset, polygon_count),
             "materials": [WbnMaterial.from_bytes(self.data, materials_offset + index * 4) for index in range(material_count)],
-            "shrunk_vertices": None if shrunk_offset is None else [
-                WbnVertex.from_bytes(self.data, shrunk_offset + index * 6) for index in range(vertex_count)
-            ],
+            "shrunk_vertices": None if shrunk_offset is None else self._vertices(shrunk_offset, vertex_count),
             "_vertices_offset": vertices_offset,
             "_polygons_offset": polygons_offset,
             "_materials_offset": materials_offset,
@@ -627,12 +698,12 @@ class _WbnParser:
         nodes_offset = self._pointer(nodes_pointer, node_count * 16, "BVH node array")
         subtrees_offset = self._pointer(subtrees_pointer, subtree_count * 16, "BVH subtree array")
         return WbnBvhTree(
-            [WbnBvhNode.from_bytes(self.data, nodes_offset + index * 16) for index in range(node_count)],
+            self._bvh_nodes(nodes_offset, node_count),
             WbnVector4.from_bytes(self.data, offset + 0x10),
             WbnVector4.from_bytes(self.data, offset + 0x20),
             WbnVector4.from_bytes(self.data, offset + 0x30),
             WbnVector4.from_bytes(self.data, offset + 0x40),
-            [WbnBvhSubTree.from_bytes(self.data, subtrees_offset + index * 16) for index in range(subtree_count)],
+            self._bvh_subtrees(subtrees_offset, subtree_count),
             depth,
             offset,
             nodes_offset,
