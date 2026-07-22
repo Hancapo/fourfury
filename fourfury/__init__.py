@@ -39,6 +39,7 @@ from .rsc import (
     rsc5_pointer_offset,
     rsc5_virtual_size,
 )
+from .wbd import WBD_DICTIONARY_SIZE, WBD_RESOURCE_VERSION, WbdDocument, WbdEntry, joaat, load_wbd
 from .wbn import (
     WBN_BOUND_SIZE,
     WBN_BVH_GEOMETRY_SIZE,
@@ -153,7 +154,8 @@ __all__ = [
     "RpfDirectoryEntry", "RpfEntry", "RpfFileEntry", "Rsc5Resource", "Rsc5Texture",
     "Rsc5TextureDictionary", "Rsc5TextureFormat", "WBN_BOUND_SIZE",
     "WBN_BVH_GEOMETRY_SIZE", "WBN_COMPOSITE_SIZE", "WBN_GEOMETRY_SIZE",
-    "WBN_RESOURCE_VERSION", "WPL_HEADER_SIZE", "WbnAabb", "WbnBound", "WbnBoundType",
+    "WBD_DICTIONARY_SIZE", "WBD_RESOURCE_VERSION", "WBN_RESOURCE_VERSION", "WPL_HEADER_SIZE",
+    "WbdDocument", "WbdEntry", "WbnAabb", "WbnBound", "WbnBoundType",
     "WbnBvhGeometry", "WbnBvhNode", "WbnBvhSubTree", "WbnBvhTree", "WbnComposite",
     "WbnDocument", "WbnGeometry", "WbnMaterial", "WbnMaterialFlags", "WbnMatrix",
     "WbnPolygon", "WbnVector3", "WbnVector4", "WbnVertex",
@@ -169,9 +171,9 @@ __all__ = [
     "WPL_INSTANCE_FLAG_INFO", "WPL_SECTION_SIZES", "WPL_VERSION", "WplBlock", "WplCull",
     "WplDocument", "WplGarage", "WplInstance", "WplInstanceFlagInfo", "WplInstanceFlags",
     "WplLodCull", "WplParkedCar", "WplStrBig", "WplTimeCycleModifier", "WplZone",
-    "create_gtxd", "create_ide", "create_img", "create_rpf", "create_wpl",
+    "create_gtxd", "create_ide", "create_img", "create_rpf", "create_wpl", "joaat",
     "explain_instance_flags",
     "extract_aes_key", "load_ide", "load_img", "load_materials", "load_rpf", "load_wbn",
-    "load_gtxd", "load_wdr", "load_wpl", "load_wtd", "read_rsc5_texture_dictionary",
+    "load_gtxd", "load_wbd", "load_wdr", "load_wpl", "load_wtd", "read_rsc5_texture_dictionary",
     "rsc5_physical_size", "rsc5_pointer_offset", "rsc5_virtual_size",
 ]

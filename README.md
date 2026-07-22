@@ -11,6 +11,7 @@
 - IDE: lossless reading and writing of sectioned definition files, including comments, blank lines, and nested MLO tokens.
 - GTXD/`txdp`: typed child-to-parent texture dictionary hierarchies, lossless editing, chain resolution, and cycle detection.
 - `materials.dat`: typed physical-material catalogs with names, FX groups, friction, elasticity, density, grip, combustion, and behavior flags.
+- WBD: typed RSC5 collision dictionaries with JOAAT lookup, shared bounds, material resolution, and lossless fixed-size editing.
 - WBN: typed RSC5 collision bounds, composites, quantized geometry, resolved physical materials, polygons, and BVH trees, with lossless fixed-size editing.
 - WDR: typed RSC5 drawables with LODs, models, decoded vertex declarations, vertex and index buffers, shaders, embedded textures, skeletons, and lights.
 - WTD: typed RSC5 texture dictionaries with names, dimensions, formats, mip chains, raw payloads, and DDS export.
@@ -112,6 +113,24 @@ bounds.save("edited.wbn")
 ```
 
 The writer preserves the original compressed resource byte-for-byte when nothing changes. It supports edits that keep array counts fixed; adding or removing bounds, vertices, polygons, materials, or BVH nodes requires pointer relocation and is rejected explicitly.
+
+WBD files contain hash-addressed collections of the same collision bounds. Dictionary entries can be found by their numeric hash or by a model name, which is converted with GTA IV's lowercase JOAAT algorithm:
+
+```python
+from fourfury import WbdDocument
+
+with ImgArchive.from_path(game / "pc/data/maps/east/bronx_e.img") as archive:
+    entry = archive.find_entry("bronx_e.wbd")
+    dictionary = WbdDocument.from_bytes(entry.read(), name=entry.name, materials=materials)
+
+for collision in dictionary:
+    print(collision.hash_hex, collision.bound.bound_type)
+
+bound = dictionary.find_bound("a_model_name")
+print(len(dictionary.bounds), len(dictionary.geometries))
+```
+
+WBD writing supports fixed-size changes to entry hashes, parent/usage metadata, and decoded bounds. Adding or removing dictionary entries requires pointer relocation and is rejected.
 
 ## Drawable models
 
@@ -221,4 +240,4 @@ print(instance.lod_distance)  # -1.0 uses the model's IDE draw distance
 - IMG3 archives are flat and cannot contain internal directories.
 - WTD structures are currently read-only; decoded texture replacement and dictionary rebuilding are not implemented yet.
 - SCO bytecode is not implemented yet.
-- WBN sphere, capsule, and box records currently expose their shared bound metadata but not every type-specific trailing field.
+- WBN/WBD sphere, capsule, and box records currently expose their shared bound metadata but not every type-specific trailing field.
