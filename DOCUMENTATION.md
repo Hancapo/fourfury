@@ -53,6 +53,11 @@ On Windows, the native AES kernel keeps the cached BCrypt key and all sixteen GT
 decryption passes inside one native call. No native APIs are exposed as part of the
 public compatibility contract; applications should continue using `GTAIVCrypto`.
 
+The native WDR decoder materializes vertex declarations as semantic columns. Parsed
+`WdrVertexBuffer.attribute_channels` can be consumed without allocating one dictionary
+per vertex; the existing `vertices` property remains available and creates row-oriented
+`WdrVertex` objects lazily. `WdrDocument.to_model()` reads the columns directly.
+
 ## Development installation
 
 ```powershell

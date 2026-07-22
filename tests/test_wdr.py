@@ -259,6 +259,24 @@ class WdrTests(unittest.TestCase):
         self.assertEqual(buffer.layout.channel_count, 4)  # type: ignore[union-attr]
         self.assertEqual(buffer.data, buffer.locked_data)  # type: ignore[union-attr]
 
+    def test_keeps_vertex_rows_lazy_when_projecting_columns(self) -> None:
+        document = WdrDocument.from_bytes(_sample_wdr())
+        buffer = document.geometries[0].vertex_buffer
+
+        self.assertIsNotNone(buffer)
+        self.assertIsNone(buffer._vertices)  # type: ignore[union-attr]
+        self.assertEqual(
+            buffer.attribute_channels[WdrVertexSemantic.POSITION][1],  # type: ignore[union-attr]
+            (1.0, 0.0, 0.0),
+        )
+
+        model = document.to_model()
+
+        self.assertEqual(model.meshes[0].positions[1], (1.0, 0.0, 0.0))
+        self.assertIsNone(buffer._vertices)  # type: ignore[union-attr]
+        self.assertEqual(tuple(buffer.vertices[1].position), (1.0, 0.0, 0.0))  # type: ignore[union-attr,arg-type]
+        self.assertIsNotNone(buffer._vertices)  # type: ignore[union-attr]
+
     def test_reads_model_and_per_geometry_bounds_without_offset_shift(self) -> None:
         source = _sample_wdr()
         payload = bytearray(zlib.decompress(source[12:]))
