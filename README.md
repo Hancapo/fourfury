@@ -133,6 +133,11 @@ for model in high_lod.models:
         print(geometry.vertices[0].texcoords)
         print(geometry.triangles[0])
 
+        # Skinned geometry stores local blend indices that address this palette.
+        if model.has_skin:
+            print(model.skin_flag, geometry.bone_ids)
+            print(geometry.resolve_bone_indices(geometry.vertices[0]))
+
         for parameter in geometry.shader.parameters:
             if parameter.texture is not None:
                 print(parameter.name, parameter.texture.name)
@@ -140,7 +145,19 @@ for model in high_lod.models:
 for texture in drawable.embedded_textures:
     print(texture.name, texture.width, texture.height, texture.format_name)
     texture.save_dds(Path("textures") / f"{texture.name}.dds")
+
+if drawable.drawable.skeleton is not None:
+    skeleton = drawable.drawable.skeleton
+    for bone in skeleton.bones:
+        print(bone.name, bone.flags, bone.parent_index)
+        print(bone.absolute_transform.translation)
 ```
+
+The semantic view exposes all four geometry vertex/index-buffer slots, matrix palettes,
+rigid and skinned model bindings, model and per-geometry bounds, complete bone records,
+parent indices, joint-scale-orientation matrices, default transforms, bind transforms,
+and the known RAGE bone flags. Raw values whose purpose is still unverified are retained
+as `reserved` fields instead of being assigned speculative meanings.
 
 The current WDR API is a read-only semantic view. `to_bytes()` and `save()` preserve the original compressed RSC5 resource exactly; editing decoded drawable structures is not serialized yet.
 

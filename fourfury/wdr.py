@@ -4,7 +4,7 @@ import os
 import struct
 import tempfile
 from dataclasses import dataclass, field
-from enum import IntEnum
+from enum import IntEnum, IntFlag
 from pathlib import Path
 from typing import BinaryIO, Iterator
 
@@ -57,6 +57,44 @@ WDR_SHADER_PARAMETER_NAMES: dict[int, str] = {
     0x44546346: "dirt_color",
     0x81DB4C55: "parallax_scale_bias",
     0x5A7625DF: "diffuse_color",
+    0x001D37B7: "world_instance_inverse_transpose",
+    0x00E67F02: "imposter_direction",
+    0x0C451B1A: "fade_thickness",
+    0x104E0B0E: "z_shift_scale",
+    0x1105818B: "alternate_remap",
+    0x1948C16C: "material_diffuse",
+    0x1C8B0AFF: "normal_table",
+    0x1D6CE221: "bone_damage_0",
+    0x1E7C18F3: "subsurface_scattering_wrap",
+    0x257DF714: "specular_2_factor",
+    0x288FD3FA: "reflective_power_enabled",
+    0x28E1926B: "specular_2_color",
+    0x3A7D3D1D: "world_instance_matrix",
+    0x3B397BBC: "subsurface_scattering_width",
+    0x4A8804FE: "specular_color_factor_enabled",
+    0x4E96F308: "tyre_deformation_enabled",
+    0x5ACBE867: "dimmer_set",
+    0x5DC44EB2: "tyre_deformation_parameters",
+    0x6A99768C: "diffuse_2_specular_modifier",
+    0x7717EDC1: "specular_2_color_intensity",
+    0x94D7098F: "specular_factor_enabled",
+    0xA38C0E4A: "z_shift",
+    0xA78EAAA7: "damage_vertex_buffer",
+    0xA8A03862: "wheel_transform",
+    0xBA54C190: "global_animation_uv_1",
+    0xBBCF983D: "switch_on",
+    0xC5CD0E78: "subsurface_color",
+    0xCC26609B: "specular_2_factor_enabled",
+    0xCD5F0A56: "bone_damage_enabled",
+    0xD5588AFC: "damage_sampler",
+    0xD79BFC1E: "global_animation_uv_0",
+    0xDBB6BF5B: "ambient_decal_mask",
+    0xE3BA8919: "damage_specular_texture_sampler",
+    0xF07391A4: "facet_mask",
+    0xF38696B0: "tyre_deformation_parameters_2",
+    0xF6543DD6: "damage_texture_sampler",
+    0xF8B1F013: "specular_2_color_intensity_reflection",
+    0xFC2BC0AA: "shadow_map_resolution",
 }
 
 
@@ -88,6 +126,99 @@ class WdrVector4:
 
     def __iter__(self) -> Iterator[float]:
         return iter((self.x, self.y, self.z, self.w))
+
+
+@dataclass(frozen=True, slots=True)
+class WdrMatrix4:
+    """A row-major 4x4 matrix using the same convention as RAGE/System.Numerics."""
+
+    values: tuple[
+        float, float, float, float,
+        float, float, float, float,
+        float, float, float, float,
+        float, float, float, float,
+    ]
+
+    @classmethod
+    def identity(cls) -> "WdrMatrix4":
+        return cls((
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            0.0, 0.0, 0.0, 1.0,
+        ))
+
+    @classmethod
+    def transformation(
+        cls,
+        scale: WdrVector3,
+        rotation: WdrVector4,
+        translation: WdrVector3,
+    ) -> "WdrMatrix4":
+        x, y, z, w = rotation
+        sx, sy, sz = scale
+        return cls((
+            sx * (1.0 - 2.0 * (y * y + z * z)),
+            sx * (2.0 * (x * y + z * w)),
+            sx * (2.0 * (x * z - y * w)),
+            0.0,
+            sy * (2.0 * (x * y - z * w)),
+            sy * (1.0 - 2.0 * (z * z + x * x)),
+            sy * (2.0 * (y * z + x * w)),
+            0.0,
+            sz * (2.0 * (x * z + y * w)),
+            sz * (2.0 * (y * z - x * w)),
+            sz * (1.0 - 2.0 * (y * y + x * x)),
+            0.0,
+            translation.x, translation.y, translation.z, 1.0,
+        ))
+
+    @property
+    def rows(self) -> tuple[tuple[float, float, float, float], ...]:
+        return tuple(
+            self.values[index:index + 4] for index in range(0, 16, 4)
+        )
+
+    @property
+    def translation(self) -> WdrVector3:
+        return WdrVector3(*self.values[12:15])
+
+    def __iter__(self) -> Iterator[float]:
+        return iter(self.values)
+
+    def __matmul__(self, other: "WdrMatrix4") -> "WdrMatrix4":
+        left = self.values
+        right = other.values
+        return WdrMatrix4(tuple(
+            sum(left[row * 4 + item] * right[item * 4 + column] for item in range(4))
+            for row in range(4)
+            for column in range(4)
+        ))  # type: ignore[arg-type]
+
+    def inverse(self) -> "WdrMatrix4":
+        augmented = [
+            list(self.values[row * 4:(row + 1) * 4])
+            + [1.0 if row == column else 0.0 for column in range(4)]
+            for row in range(4)
+        ]
+        for column in range(4):
+            pivot = max(range(column, 4), key=lambda row: abs(augmented[row][column]))
+            if abs(augmented[pivot][column]) < 1e-12:
+                raise ValueError("WDR matrix is singular")
+            augmented[column], augmented[pivot] = augmented[pivot], augmented[column]
+            divisor = augmented[column][column]
+            augmented[column] = [value / divisor for value in augmented[column]]
+            for row in range(4):
+                if row == column:
+                    continue
+                factor = augmented[row][column]
+                augmented[row] = [
+                    value - factor * pivot_value
+                    for value, pivot_value in zip(augmented[row], augmented[column], strict=True)
+                ]
+        return WdrMatrix4(tuple(
+            augmented[row][column] for row in range(4) for column in range(4, 8)
+        ))  # type: ignore[arg-type]
 
 
 class WdrLodLevel(IntEnum):
@@ -161,12 +292,24 @@ class WdrVertexElement:
 
 @dataclass(frozen=True, slots=True)
 class WdrVertexLayout:
+    fvf: int
+    fvf_size: int
     flags: int
-    stride: int
-    element_count: int
+    dynamic_order: int
+    channel_count: int
     declaration_types: int
     elements: tuple[WdrVertexElement, ...]
     _pointer: int = field(repr=False, compare=False)
+
+    @property
+    def stride(self) -> int:
+        """Compatibility alias for :attr:`fvf_size`."""
+        return self.fvf_size
+
+    @property
+    def element_count(self) -> int:
+        """Compatibility alias for :attr:`channel_count`."""
+        return self.channel_count
 
 
 VertexValue = float | int | tuple[float | int, ...]
@@ -207,21 +350,52 @@ class WdrVertex:
                 result.append(tuple(value))  # type: ignore[arg-type]
         return tuple(result)
 
+    @property
+    def blend_weights(self) -> VertexValue | None:
+        return self.attributes.get(WdrVertexSemantic.BLEND_WEIGHTS)
+
+    @property
+    def blend_indices(self) -> VertexValue | None:
+        return self.attributes.get(WdrVertexSemantic.BLEND_INDICES)
+
+    @property
+    def tangent(self) -> VertexValue | None:
+        return self.attributes.get(WdrVertexSemantic.TANGENT)
+
+    @property
+    def binormal(self) -> VertexValue | None:
+        return self.attributes.get(WdrVertexSemantic.BINORMAL)
+
 
 @dataclass(slots=True)
 class WdrVertexBuffer:
     vertex_count: int
+    locked: int
+    flags: int
     stride: int
     layout: WdrVertexLayout
-    data: bytes
-    secondary_data: bytes
+    locked_data: bytes
+    lock_thread_id: int
+    vertex_data: bytes
+    d3d_vertex_buffer: int
     vertices: tuple[WdrVertex, ...]
     _pointer: int = field(repr=False, compare=False)
+
+    @property
+    def data(self) -> bytes:
+        """Compatibility alias for the locked vertex data."""
+        return self.locked_data
+
+    @property
+    def secondary_data(self) -> bytes:
+        """Compatibility alias for the regular vertex data."""
+        return self.vertex_data
 
 
 @dataclass(slots=True)
 class WdrIndexBuffer:
     indices: tuple[int, ...]
+    reserved: tuple[int, int, int, int, int, int, int, int, int]
     _pointer: int = field(repr=False, compare=False)
 
 
@@ -253,11 +427,13 @@ class WdrShader:
     name: str
     file_name: str
     name_hash: int
+    block_map_address: int
     version: int
     draw_bucket: int
     usage_count: int
     shader_index: int
     parameters: tuple[WdrShaderParameter, ...]
+    reserved: tuple[int, ...]
     _pointer: int = field(repr=False, compare=False)
 
 
@@ -266,23 +442,46 @@ class WdrShaderGroup:
     shaders: tuple[WdrShader, ...]
     texture_dictionary_pointer: int
     vertex_declaration_usage_flags: tuple[int, ...]
+    reserved: tuple[int, int, int, int, int, int, int, int, int, int, int, int]
+    reserved_data: tuple[int, ...]
     texture_dictionary: Rsc5TextureDictionary | None = field(repr=False, compare=False)
     _pointer: int = field(repr=False, compare=False)
 
 
 @dataclass(slots=True)
 class WdrGeometry:
-    vertex_buffer: WdrVertexBuffer | None
-    index_buffer: WdrIndexBuffer | None
+    vertex_buffers: tuple[
+        WdrVertexBuffer | None,
+        WdrVertexBuffer | None,
+        WdrVertexBuffer | None,
+        WdrVertexBuffer | None,
+    ]
+    index_buffers: tuple[
+        WdrIndexBuffer | None,
+        WdrIndexBuffer | None,
+        WdrIndexBuffer | None,
+        WdrIndexBuffer | None,
+    ]
     index_count: int
     face_count: int
     vertex_count: int
     primitive_type: int
+    bone_ids: tuple[int, ...]
     vertex_stride: int
+    reserved_header: tuple[int, int]
+    reserved_tail: tuple[int, int, int, int]
     shader_index: int = 0
     bounding_sphere: WdrVector4 | None = None
     shader: WdrShader | None = field(default=None, repr=False, compare=False)
     _pointer: int = field(default=0, repr=False, compare=False)
+
+    @property
+    def vertex_buffer(self) -> WdrVertexBuffer | None:
+        return self.vertex_buffers[0]
+
+    @property
+    def index_buffer(self) -> WdrIndexBuffer | None:
+        return self.index_buffers[0]
 
     @property
     def vertices(self) -> tuple[WdrVertex, ...]:
@@ -302,24 +501,51 @@ class WdrGeometry:
             for index in range(0, count - 2, 3)
         )
 
+    def resolve_bone_indices(self, vertex: WdrVertex) -> tuple[int, ...]:
+        """Resolve a vertex's local blend indices through this geometry's matrix palette."""
+        value = vertex.blend_indices
+        if value is None:
+            return ()
+        local_indices = (value,) if isinstance(value, int) else value
+        return tuple(
+            self.bone_ids[index] if self.bone_ids and index < len(self.bone_ids) else index
+            for index in (int(item) for item in local_indices)
+        )
+
 
 @dataclass(slots=True)
 class WdrDrawableModel:
     geometries: tuple[WdrGeometry, ...]
+    bounding_sphere: WdrVector4 | None
     geometry_bounds: tuple[WdrVector4 | None, ...]
     shader_mappings: tuple[int, ...]
-    skeleton_binding: int
-    render_mask: int
+    matrix_count: int
     flags: int
+    model_type: int
+    matrix_index: int
+    stride: int
+    skin_flag: int
+    reserved: int
     _pointer: int = field(repr=False, compare=False)
 
     @property
     def bone_index(self) -> int:
-        return (self.skeleton_binding >> 24) & 0xFF
+        """Compatibility alias for rigid models bound to one matrix."""
+        return self.matrix_index
 
     @property
     def has_skin(self) -> bool:
-        return bool((self.skeleton_binding >> 8) & 0xFF)
+        return self.skin_flag == 1
+
+    @property
+    def skeleton_binding(self) -> int:
+        """Return the legacy packed representation of the four matrix metadata bytes."""
+        return (
+            self.matrix_count
+            | (self.flags << 8)
+            | (self.model_type << 16)
+            | (self.matrix_index << 24)
+        )
 
 
 @dataclass(slots=True)
@@ -327,6 +553,7 @@ class WdrDrawableLod:
     level: WdrLodLevel
     distance: float
     models: tuple[WdrDrawableModel, ...]
+    reserved: tuple[int, int]
     _pointer: int = field(repr=False, compare=False)
 
     @property
@@ -340,28 +567,91 @@ class WdrBoneId:
     bone_index: int
 
 
+class WdrBoneFlags(IntFlag):
+    NONE = 0
+    ROTATION_ONLY = 0x000001
+    ROTATE_X = 0x000002
+    ROTATE_Y = 0x000004
+    ROTATE_Z = 0x000008
+    ROTATE_X_LIMITED = 0x000010
+    ROTATE_Y_LIMITED = 0x000020
+    ROTATE_Z_LIMITED = 0x000040
+    TRANSLATE_X = 0x000080
+    TRANSLATE_Y = 0x000100
+    TRANSLATE_Z = 0x000200
+    TRANSLATE_X_LIMITED = 0x000400
+    TRANSLATE_Y_LIMITED = 0x000800
+    TRANSLATE_Z_LIMITED = 0x001000
+    SCALE_X = 0x002000
+    SCALE_Y = 0x004000
+    SCALE_Z = 0x008000
+    SCALE_X_LIMITED = 0x010000
+    SCALE_Y_LIMITED = 0x020000
+    SCALE_Z_LIMITED = 0x040000
+    INVISIBLE = 0x080000
+
+
 @dataclass(slots=True)
 class WdrBone:
     name: str
     index: int
     bone_id: int
     mirror_index: int
-    flags: int
+    flags: WdrBoneFlags
     parent_index: int | None
     first_child_index: int | None
     next_sibling_index: int | None
-    position: WdrVector4
-    rotation: WdrVector4
-    scale: WdrVector4
+    original_position: WdrVector4
+    original_rotation_euler: WdrVector4
+    original_rotation: WdrVector4
+    original_scale: WdrVector4
     absolute_position: WdrVector4
+    absolute_rotation_euler: WdrVector4
+    scale_orientation: WdrVector4
+    translation_minimum: WdrVector4
+    translation_maximum: WdrVector4
+    rotation_minimum: WdrVector4
+    rotation_maximum: WdrVector4
+    reserved_vector: WdrVector4
+    reserved_short: int
+    reserved_value: int
+    cumulative_inverse_joint_scale_orientation: WdrMatrix4
+    cumulative_joint_scale_orientation: WdrMatrix4
+    default_transform: WdrMatrix4
     _pointer: int = field(repr=False, compare=False)
+    local_transform: WdrMatrix4 = field(default_factory=WdrMatrix4.identity)
+    absolute_transform: WdrMatrix4 = field(default_factory=WdrMatrix4.identity)
+    inverse_bind_transform: WdrMatrix4 = field(default_factory=WdrMatrix4.identity)
+    skin_transform: WdrMatrix4 = field(default_factory=WdrMatrix4.identity)
+
+    @property
+    def position(self) -> WdrVector4:
+        return self.original_position
+
+    @property
+    def rotation(self) -> WdrVector4:
+        return self.original_rotation
+
+    @property
+    def scale(self) -> WdrVector4:
+        return self.original_scale
 
 
 @dataclass(slots=True)
 class WdrSkeleton:
     bones: tuple[WdrBone, ...]
     bone_ids: tuple[WdrBoneId, ...]
+    parent_indices: tuple[int, ...]
+    cumulative_inverse_joint_scale_orientations: tuple[WdrMatrix4, ...]
+    cumulative_joint_scale_orientations: tuple[WdrMatrix4, ...]
+    default_transforms: tuple[WdrMatrix4, ...]
+    translation_dof_count: int
+    rotation_dof_count: int
+    scale_dof_count: int
     flags: int
+    reference_count: int
+    signature: int
+    reserved: tuple[int, int, int, int]
     _pointer: int = field(repr=False, compare=False)
 
 
@@ -393,6 +683,8 @@ class WdrLight:
     fade_distance: float
     shadow_fade_distance: float
     bone_id: int
+    reserved_1: int
+    reserved_2: int
 
 
 @dataclass(slots=True)
@@ -406,6 +698,7 @@ class WdrDrawable:
     shader_group: WdrShaderGroup | None
     skeleton: WdrSkeleton | None
     lights: tuple[WdrLight, ...]
+    reserved: tuple[int, int, int, int, int]
 
     @property
     def models(self) -> tuple[WdrDrawableModel, ...]:
@@ -464,6 +757,9 @@ class _WdrReader:
     def vector4(self, pointer: int, label: str) -> WdrVector4:
         return WdrVector4(*self.unpack(pointer, "<4f", label))  # type: ignore[arg-type]
 
+    def matrix4(self, pointer: int, label: str) -> WdrMatrix4:
+        return WdrMatrix4(self.unpack(pointer, "<16f", label))  # type: ignore[arg-type]
+
     def pointer_array(self, header_pointer: int, label: str) -> tuple[int, ...]:
         array_pointer, count, capacity = self.unpack(header_pointer, "<IHH", f"{label} header")
         if capacity < count:
@@ -491,13 +787,13 @@ class _WdrReader:
     def parse_layout(self, pointer: int) -> WdrVertexLayout:
         if pointer in self.layouts:
             return self.layouts[pointer]
-        flags, stride, _storage, element_count, declaration_types = self.unpack(
-            pointer, "<IHBBQ", "WDR vertex layout"
+        fvf, fvf_size, flags, dynamic_order, channel_count, declaration_types = self.unpack(
+            pointer, "<IBBBBQ", "WDR vertex layout"
         )
         elements: list[WdrVertexElement] = []
         offset = 0
         for semantic_value in range(16):
-            if not flags & (1 << semantic_value):
+            if not fvf & (1 << semantic_value):
                 continue
             type_value = (declaration_types >> (semantic_value * 4)) & 0xF
             try:
@@ -511,13 +807,22 @@ class _WdrReader:
                 WdrVertexElement(WdrVertexSemantic(semantic_value), element_type, offset)
             )
             offset += size
-        if len(elements) != element_count:
+        if len(elements) != channel_count:
             raise ValueError(
-                f"WDR vertex layout declares {element_count} elements but flags describe {len(elements)}"
+                f"WDR vertex layout declares {channel_count} channels but its FVF describes {len(elements)}"
             )
-        if offset > stride:
-            raise ValueError(f"WDR vertex elements exceed their {stride}-byte stride")
-        layout = WdrVertexLayout(flags, stride, element_count, declaration_types, tuple(elements), pointer)
+        if offset > fvf_size:
+            raise ValueError(f"WDR vertex elements exceed their {fvf_size}-byte FVF size")
+        layout = WdrVertexLayout(
+            int(fvf),
+            int(fvf_size),
+            int(flags),
+            int(dynamic_order),
+            int(channel_count),
+            int(declaration_types),
+            tuple(elements),
+            pointer,
+        )
         self.layouts[pointer] = layout
         return layout
 
@@ -563,31 +868,47 @@ class _WdrReader:
             return self.vertex_buffers[pointer]
         raw = self.read(pointer, WDR_VERTEX_BUFFER_SIZE, "WDR vertex buffer")
         vertex_count = struct.unpack_from("<H", raw, 4)[0]
-        data_pointer = struct.unpack_from("<I", raw, 8)[0]
+        locked, flags = struct.unpack_from("<2B", raw, 6)
+        locked_data_pointer = struct.unpack_from("<I", raw, 8)[0]
         stride = struct.unpack_from("<I", raw, 12)[0]
         layout_pointer = struct.unpack_from("<I", raw, 16)[0]
-        secondary_pointer = struct.unpack_from("<I", raw, 24)[0]
+        lock_thread_id = struct.unpack_from("<I", raw, 20)[0]
+        vertex_data_pointer = struct.unpack_from("<I", raw, 24)[0]
+        d3d_vertex_buffer = struct.unpack_from("<I", raw, 28)[0]
         layout = self.parse_layout(layout_pointer)
         if layout.stride != stride:
             raise ValueError(
                 f"WDR vertex buffer stride {stride} does not match layout stride {layout.stride}"
             )
         data_size = vertex_count * stride
-        data = b"" if data_pointer == 0 else self.read(data_pointer, data_size, "WDR vertex data")
-        if secondary_pointer == data_pointer:
-            secondary_data = data
+        locked_data = (
+            b"" if locked_data_pointer == 0
+            else self.read(locked_data_pointer, data_size, "WDR locked vertex data")
+        )
+        if vertex_data_pointer == locked_data_pointer:
+            vertex_data = locked_data
         else:
-            secondary_data = (
-                b"" if secondary_pointer == 0
-                else self.read(secondary_pointer, data_size, "WDR secondary vertex data")
+            vertex_data = (
+                b"" if vertex_data_pointer == 0
+                else self.read(vertex_data_pointer, data_size, "WDR vertex data")
             )
-        primary = data or secondary_data
+        primary = locked_data or vertex_data
         vertices = tuple(
             self.decode_vertex(primary, index * stride, layout)
             for index in range(vertex_count)
         ) if primary else ()
         buffer = WdrVertexBuffer(
-            vertex_count, stride, layout, data, secondary_data, vertices, pointer
+            vertex_count,
+            locked,
+            flags,
+            stride,
+            layout,
+            locked_data,
+            lock_thread_id,
+            vertex_data,
+            d3d_vertex_buffer,
+            vertices,
+            pointer,
         )
         self.vertex_buffers[pointer] = buffer
         return buffer
@@ -600,7 +921,8 @@ class _WdrReader:
         indices = () if count == 0 else self.unpack(
             data_pointer, f"<{count}H", "WDR index data"
         )
-        buffer = WdrIndexBuffer(indices, pointer)  # type: ignore[arg-type]
+        reserved = struct.unpack_from("<9I", raw, 12)
+        buffer = WdrIndexBuffer(indices, reserved, pointer)  # type: ignore[arg-type]
         self.index_buffers[pointer] = buffer
         return buffer
 
@@ -608,31 +930,45 @@ class _WdrReader:
         if pointer in self.geometries:
             return self.geometries[pointer]
         raw = self.read(pointer, WDR_GEOMETRY_SIZE, "WDR geometry")
-        vertex_buffer_pointer = struct.unpack_from("<I", raw, 12)[0]
-        index_buffer_pointer = struct.unpack_from("<I", raw, 28)[0]
+        reserved_header = struct.unpack_from("<2I", raw, 4)
+        vertex_buffer_pointers = struct.unpack_from("<4I", raw, 12)
+        index_buffer_pointers = struct.unpack_from("<4I", raw, 28)
         index_count, face_count = struct.unpack_from("<II", raw, 44)
         vertex_count, primitive_type = struct.unpack_from("<HH", raw, 52)
-        vertex_stride = struct.unpack_from("<H", raw, 60)[0]
-        vertex_buffer = (
-            None if vertex_buffer_pointer == 0 else self.parse_vertex_buffer(vertex_buffer_pointer)
+        bone_ids_pointer, vertex_stride, bone_ids_count = struct.unpack_from("<IHH", raw, 56)
+        reserved_tail = struct.unpack_from("<4I", raw, 64)
+        vertex_buffers = tuple(
+            None if item == 0 else self.parse_vertex_buffer(item)
+            for item in vertex_buffer_pointers
         )
-        index_buffer = (
-            None if index_buffer_pointer == 0 else self.parse_index_buffer(index_buffer_pointer)
+        index_buffers = tuple(
+            None if item == 0 else self.parse_index_buffer(item)
+            for item in index_buffer_pointers
         )
+        vertex_buffer = vertex_buffers[0]
+        index_buffer = index_buffers[0]
+        if vertex_count == 0 and vertex_buffer is not None:
+            vertex_count = vertex_buffer.vertex_count
         if vertex_buffer is not None and vertex_buffer.vertex_count != vertex_count:
             raise ValueError("WDR geometry vertex count does not match its vertex buffer")
         if vertex_buffer is not None and vertex_buffer.stride != vertex_stride:
             raise ValueError("WDR geometry vertex stride does not match its vertex buffer")
         if index_buffer is not None and len(index_buffer.indices) < index_count:
             raise ValueError("WDR geometry index count exceeds its index buffer")
+        bone_ids = () if bone_ids_count == 0 else self.unpack(
+            bone_ids_pointer, f"<{bone_ids_count}H", "WDR geometry bone palette"
+        )
         geometry = WdrGeometry(
-            vertex_buffer,
-            index_buffer,
+            vertex_buffers,  # type: ignore[arg-type]
+            index_buffers,  # type: ignore[arg-type]
             index_count,
             face_count,
             vertex_count,
             primitive_type,
+            tuple(int(value) for value in bone_ids),
             vertex_stride,
+            reserved_header,
+            reserved_tail,
             _pointer=pointer,
         )
         self.geometries[pointer] = geometry
@@ -643,17 +979,29 @@ class _WdrReader:
             return self.models[pointer]
         raw = self.read(pointer, WDR_MODEL_SIZE, "WDR drawable model")
         geometry_pointers = self.pointer_array(pointer + 4, "WDR model geometry pointers")
-        bounds_pointer, shader_mapping_pointer, skeleton_binding = struct.unpack_from("<3I", raw, 12)
-        render_mask_flags, geometry_count = struct.unpack_from("<HH", raw, 24)
+        bounds_pointer, shader_mapping_pointer = struct.unpack_from("<2I", raw, 12)
+        matrix_count, flags, model_type, matrix_index, stride, skin_flag = struct.unpack_from(
+            "<6B", raw, 20
+        )
+        geometry_count = struct.unpack_from("<H", raw, 26)[0]
+        reserved = struct.unpack_from("<I", raw, 28)[0]
         if len(geometry_pointers) != geometry_count:
             raise ValueError("WDR model geometry count does not match its pointer array")
         geometries = tuple(self.parse_geometry(item) for item in geometry_pointers)
-        bounds = () if geometry_count == 0 else (
-            tuple(None for _ in range(geometry_count)) if bounds_pointer == 0 else tuple(
-                self.vector4(bounds_pointer + index * 16, "WDR geometry bound")
-                for index in range(geometry_count)
-            )
+        raw_bound_count = geometry_count + 1 if geometry_count > 1 else geometry_count
+        raw_bounds = () if raw_bound_count == 0 or bounds_pointer == 0 else tuple(
+            self.vector4(bounds_pointer + index * 16, "WDR model geometry bound")
+            for index in range(raw_bound_count)
         )
+        if not raw_bounds:
+            bounding_sphere = None
+            bounds = tuple(None for _ in range(geometry_count))
+        elif geometry_count > 1:
+            bounding_sphere = raw_bounds[0]
+            bounds = raw_bounds[1:]
+        else:
+            bounding_sphere = raw_bounds[0]
+            bounds = raw_bounds
         shader_mappings = () if geometry_count == 0 else (
             tuple(0 for _ in range(geometry_count)) if shader_mapping_pointer == 0 else self.unpack(
                 shader_mapping_pointer, f"<{geometry_count}H", "WDR shader mappings"
@@ -664,11 +1012,16 @@ class _WdrReader:
             geometry.bounding_sphere = bounds[index]
         model = WdrDrawableModel(
             geometries,
+            bounding_sphere,
             bounds,
             tuple(int(value) for value in shader_mappings),
-            skeleton_binding,
-            render_mask_flags & 0xFF,
-            (render_mask_flags >> 8) & 0xFF,
+            matrix_count,
+            flags,
+            model_type,
+            matrix_index,
+            stride,
+            skin_flag,
+            reserved,
             pointer,
         )
         self.models[pointer] = model
@@ -680,10 +1033,15 @@ class _WdrReader:
             lod.level = level
             lod.distance = distance
             return lod
-        self.read(pointer, WDR_LOD_SIZE, "WDR drawable LOD")
+        raw = self.read(pointer, WDR_LOD_SIZE, "WDR drawable LOD")
         model_pointers = self.pointer_array(pointer, "WDR LOD model pointers")
+        reserved = struct.unpack_from("<2I", raw, 8)
         lod = WdrDrawableLod(
-            level, distance, tuple(self.parse_model(item) for item in model_pointers), pointer
+            level,
+            distance,
+            tuple(self.parse_model(item) for item in model_pointers),
+            reserved,
+            pointer,
         )
         self.lods[pointer] = lod
         return lod
@@ -703,6 +1061,7 @@ class _WdrReader:
         if pointer in self.shaders:
             return self.shaders[pointer]
         raw = self.read(pointer, WDR_SHADER_SIZE, "WDR shader")
+        block_map_address = struct.unpack_from("<I", raw, 4)[0]
         version, draw_bucket, usage_count = struct.unpack_from("<3B", raw, 8)
         shader_index = struct.unpack_from("<H", raw, 14)[0]
         parameter_data_pointer = struct.unpack_from("<I", raw, 20)[0]
@@ -711,6 +1070,19 @@ class _WdrReader:
         name_hash = struct.unpack_from("<I", raw, 40)[0]
         parameter_names_pointer = struct.unpack_from("<I", raw, 52)[0]
         name_pointer, file_name_pointer = struct.unpack_from("<2I", raw, 68)
+        reserved = (
+            raw[11],
+            struct.unpack_from("<H", raw, 12)[0],
+            struct.unpack_from("<I", raw, 16)[0],
+            struct.unpack_from("<I", raw, 24)[0],
+            struct.unpack_from("<I", raw, 32)[0],
+            struct.unpack_from("<I", raw, 44)[0],
+            struct.unpack_from("<I", raw, 48)[0],
+            struct.unpack_from("<I", raw, 56)[0],
+            struct.unpack_from("<I", raw, 60)[0],
+            struct.unpack_from("<I", raw, 64)[0],
+            *struct.unpack_from("<5I", raw, 76),
+        )
         parameter_pointers = () if parameter_count == 0 else self.unpack(
             parameter_data_pointer, f"<{parameter_count}I", "WDR shader parameter pointers"
         )
@@ -747,11 +1119,13 @@ class _WdrReader:
             self.string(name_pointer),
             self.string(file_name_pointer),
             name_hash,
+            block_map_address,
             version,
             draw_bucket,
             usage_count,
             shader_index,
             tuple(parameters),
+            reserved,
             pointer,
         )
         self.shaders[pointer] = shader
@@ -764,10 +1138,14 @@ class _WdrReader:
         usage_values = self.plain_array(
             pointer + 64, "I", 4, "WDR vertex declaration usage flags"
         )
+        reserved = struct.unpack_from("<12I", raw, 16)
+        reserved_data = self.plain_array(pointer + 72, "I", 4, "WDR shader group reserved data")
         return WdrShaderGroup(
             tuple(self.parse_shader(item) for item in shader_pointers),
             texture_dictionary_pointer,
             tuple(int(value) for value in usage_values),
+            reserved,
+            tuple(int(value) for value in reserved_data),
             (
                 read_rsc5_texture_dictionary(self.resource, texture_dictionary_pointer)
                 if texture_dictionary_pointer else None
@@ -777,8 +1155,19 @@ class _WdrReader:
 
     def parse_skeleton(self, pointer: int) -> WdrSkeleton:
         raw = self.read(pointer, 64, "WDR skeleton")
-        bones_pointer = struct.unpack_from("<I", raw, 0)[0]
-        bone_count = struct.unpack_from("<H", raw, 20)[0]
+        (
+            bones_pointer,
+            parent_indices_pointer,
+            cumulative_inverse_pointer,
+            cumulative_pointer,
+            default_transforms_pointer,
+        ) = struct.unpack_from("<5I", raw, 0)
+        (
+            bone_count,
+            translation_dof_count,
+            rotation_dof_count,
+            scale_dof_count,
+        ) = struct.unpack_from("<4H", raw, 20)
         flags = struct.unpack_from("<I", raw, 28)[0]
         bone_ids_pointer, bone_id_count, bone_id_capacity = self.unpack(
             pointer + 32, "<IHH", "WDR bone ID map header"
@@ -787,10 +1176,35 @@ class _WdrReader:
             raise ValueError("WDR bone ID map count exceeds its capacity")
         bone_ids = tuple(
             WdrBoneId(*self.unpack(
-                bone_ids_pointer + index * 4, "<hh", "WDR bone ID map entry"
+                bone_ids_pointer + index * 4, "<HH", "WDR bone ID map entry"
             ))
             for index in range(bone_id_count)
         ) if bone_id_count else ()
+        reference_count, signature, *reserved = struct.unpack_from("<6I", raw, 40)
+        parent_indices = (
+            tuple(-1 for _ in range(bone_count))
+            if parent_indices_pointer == 0 else tuple(int(value) for value in self.unpack(
+                parent_indices_pointer, f"<{bone_count}i", "WDR skeleton parent indices"
+            ))
+        )
+
+        def read_matrices(array_pointer: int, label: str) -> tuple[WdrMatrix4, ...]:
+            if array_pointer == 0:
+                return tuple(WdrMatrix4.identity() for _ in range(bone_count))
+            return tuple(
+                self.matrix4(array_pointer + index * 64, label)
+                for index in range(bone_count)
+            )
+
+        cumulative_inverse = read_matrices(
+            cumulative_inverse_pointer, "WDR cumulative inverse joint scale orientation"
+        )
+        cumulative = read_matrices(
+            cumulative_pointer, "WDR cumulative joint scale orientation"
+        )
+        default_transforms = read_matrices(
+            default_transforms_pointer, "WDR default bone transform"
+        )
         pointer_to_index = {
             bones_pointer + index * 224: index for index in range(bone_count)
         }
@@ -799,27 +1213,91 @@ class _WdrReader:
             bone_pointer = bones_pointer + index * 224
             bone_raw = self.read(bone_pointer, 224, "WDR bone")
             name_pointer = struct.unpack_from("<I", bone_raw, 0)[0]
-            bone_flags = struct.unpack_from("<H", bone_raw, 6)[0]
+            bone_flags = struct.unpack_from("<I", bone_raw, 4)[0]
             sibling_pointer, child_pointer, parent_pointer = struct.unpack_from("<3I", bone_raw, 8)
-            stored_index, bone_id, mirror_index = struct.unpack_from("<3H", bone_raw, 20)
+            stored_index, bone_id, mirror_index, reserved_short = struct.unpack_from(
+                "<4H", bone_raw, 20
+            )
+            reserved_value = struct.unpack_from("<I", bone_raw, 28)[0]
+            parent_index = parent_indices[index]
+            if bone_id == 0 or not 0 <= parent_index < bone_count:
+                parent_index = None
             bones.append(
                 WdrBone(
                     self.string(name_pointer),
                     stored_index,
                     bone_id,
                     mirror_index,
-                    bone_flags,
-                    pointer_to_index.get(parent_pointer),
+                    WdrBoneFlags(bone_flags),
+                    parent_index,
                     pointer_to_index.get(child_pointer),
                     pointer_to_index.get(sibling_pointer),
-                    self.vector4(bone_pointer + 32, "WDR bone position"),
-                    self.vector4(bone_pointer + 64, "WDR bone rotation"),
-                    self.vector4(bone_pointer + 80, "WDR bone scale"),
+                    self.vector4(bone_pointer + 32, "WDR bone original position"),
+                    self.vector4(bone_pointer + 48, "WDR bone original Euler rotation"),
+                    self.vector4(bone_pointer + 64, "WDR bone original rotation"),
+                    self.vector4(bone_pointer + 80, "WDR bone original scale"),
                     self.vector4(bone_pointer + 96, "WDR bone absolute position"),
+                    self.vector4(bone_pointer + 112, "WDR bone absolute Euler rotation"),
+                    self.vector4(bone_pointer + 128, "WDR bone scale orientation"),
+                    self.vector4(bone_pointer + 144, "WDR bone minimum translation"),
+                    self.vector4(bone_pointer + 160, "WDR bone maximum translation"),
+                    self.vector4(bone_pointer + 176, "WDR bone minimum rotation"),
+                    self.vector4(bone_pointer + 192, "WDR bone maximum rotation"),
+                    self.vector4(bone_pointer + 208, "WDR bone reserved vector"),
+                    reserved_short,
+                    reserved_value,
+                    cumulative_inverse[index],
+                    cumulative[index],
+                    default_transforms[index],
                     bone_pointer,
                 )
             )
-        return WdrSkeleton(tuple(bones), bone_ids, flags, pointer)
+
+        completed: set[int] = set()
+        active: set[int] = set()
+
+        def update_transform(index: int) -> WdrMatrix4:
+            bone = bones[index]
+            if index in completed:
+                return bone.absolute_transform
+            if index in active:
+                raise ValueError("cyclic WDR skeleton parent hierarchy")
+            active.add(index)
+            bone.local_transform = WdrMatrix4.transformation(
+                WdrVector3(1.0, 1.0, 1.0),
+                bone.original_rotation,
+                WdrVector3(*tuple(bone.original_position)[:3]),
+            )
+            bone.absolute_transform = (
+                bone.local_transform
+                if bone.parent_index is None
+                else bone.local_transform @ update_transform(bone.parent_index)
+            )
+            bone.inverse_bind_transform = bone.absolute_transform.inverse()
+            bone.skin_transform = bone.inverse_bind_transform @ bone.absolute_transform
+            active.remove(index)
+            completed.add(index)
+            return bone.absolute_transform
+
+        for index in range(bone_count):
+            update_transform(index)
+
+        return WdrSkeleton(
+            tuple(bones),
+            bone_ids,
+            parent_indices,
+            cumulative_inverse,
+            cumulative,
+            default_transforms,
+            translation_dof_count,
+            rotation_dof_count,
+            scale_dof_count,
+            flags,
+            reference_count,
+            signature,
+            tuple(reserved),  # type: ignore[arg-type]
+            pointer,
+        )
 
     def parse_light(self, pointer: int) -> WdrLight:
         raw = self.read(pointer, WDR_LIGHT_SIZE, "WDR light")
@@ -830,6 +1308,7 @@ class _WdrReader:
         values = struct.unpack_from("<8f", raw, 44)
         flags, corona_hash, luminosity_hash = struct.unpack_from("<3I", raw, 76)
         flashiness = raw[88]
+        reserved_1 = struct.unpack_from("<H", raw, 89)[0]
         light_type_value = raw[91]
         try:
             light_type: WdrLightType | int = WdrLightType(light_type_value)
@@ -839,6 +1318,7 @@ class _WdrReader:
             "<3f", raw, 92
         )
         bone_id = struct.unpack_from("<H", raw, 104)[0]
+        reserved_2 = struct.unpack_from("<H", raw, 106)[0]
         return WdrLight(
             position,
             direction,
@@ -854,6 +1334,8 @@ class _WdrReader:
             fade_distance,
             shadow_fade_distance,
             bone_id,
+            reserved_1,
+            reserved_2,
         )
 
     def parse_drawable(self) -> WdrDrawable:
@@ -892,6 +1374,7 @@ class _WdrReader:
             self.parse_light(lights_pointer + index * WDR_LIGHT_SIZE)
             for index in range(light_count)
         ) if light_count else ()
+        reserved = (*struct.unpack_from("<3I", raw, 116), *struct.unpack_from("<2I", raw, 136))
         return WdrDrawable(
             bounding_center,
             bounding_box_minimum,
@@ -902,6 +1385,7 @@ class _WdrReader:
             shader_group,
             skeleton,
             lights,
+            reserved,
         )
 
 
@@ -997,10 +1481,10 @@ __all__ = [
     "WDR_DRAWABLE_SIZE", "WDR_GEOMETRY_SIZE", "WDR_INDEX_BUFFER_SIZE", "WDR_LIGHT_SIZE",
     "WDR_LOD_SIZE", "WDR_MODEL_SIZE", "WDR_RESOURCE_VERSION", "WDR_SHADER_PARAMETER_NAMES",
     "WDR_SHADER_SIZE", "WDR_VERTEX_BUFFER_SIZE", "WDR_VERTEX_LAYOUT_SIZE", "WdrBone",
-    "WdrBoneId", "WdrDocument", "WdrDrawable", "WdrDrawableLod", "WdrDrawableModel",
+    "WdrBoneFlags", "WdrBoneId", "WdrDocument", "WdrDrawable", "WdrDrawableLod", "WdrDrawableModel",
     "WdrGeometry", "WdrIndexBuffer", "WdrLight", "WdrLightType", "WdrLodLevel",
     "WdrPrimitiveType", "WdrShader", "WdrShaderGroup", "WdrShaderParameter", "WdrSkeleton",
-    "WdrTextureReference", "WdrVector2", "WdrVector3", "WdrVector4", "WdrVertex",
+    "WdrMatrix4", "WdrTextureReference", "WdrVector2", "WdrVector3", "WdrVector4", "WdrVertex",
     "WdrVertexBuffer", "WdrVertexElement", "WdrVertexElementType", "WdrVertexLayout",
     "WdrVertexSemantic", "load_wdr",
 ]

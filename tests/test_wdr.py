@@ -7,9 +7,11 @@ import zlib
 
 from fourfury.wdr import (
     WDR_RESOURCE_VERSION,
+    WdrBoneFlags,
     WdrDocument,
     WdrLightType,
     WdrLodLevel,
+    WdrVertex,
     WdrVertexSemantic,
     load_wdr,
 )
@@ -46,8 +48,9 @@ def _sample_wdr() -> bytes:
 
     struct.pack_into("<I", virtual, 0x140, 0x6B0234)
     struct.pack_into("<IHH", virtual, 0x144, _virtual(0x160), 1, 1)
-    struct.pack_into("<3I", virtual, 0x14C, _virtual(0x180), _virtual(0x190), 2 << 24)
-    struct.pack_into("<HHI", virtual, 0x158, 0x0001, 1, 0)
+    struct.pack_into("<2I", virtual, 0x14C, _virtual(0x180), _virtual(0x190))
+    struct.pack_into("<4B", virtual, 0x154, 2, 4, 0xCD, 2)
+    struct.pack_into("<2BHI", virtual, 0x158, 0, 1, 1, 0)
     struct.pack_into("<I", virtual, 0x160, _virtual(0x200))
     struct.pack_into("<4f", virtual, 0x180, 0.5, 0.5, 0.0, 2.0)
     struct.pack_into("<H", virtual, 0x190, 0)
@@ -56,7 +59,8 @@ def _sample_wdr() -> bytes:
     struct.pack_into("<I", virtual, 0x20C, _virtual(0x280))
     struct.pack_into("<I", virtual, 0x21C, _virtual(0x2C0))
     struct.pack_into("<IIHH", virtual, 0x22C, 3, 1, 3, 3)
-    struct.pack_into("<H", virtual, 0x23C, 36)
+    struct.pack_into("<IHH", virtual, 0x238, _virtual(0x1B0), 36, 2)
+    struct.pack_into("<2H", virtual, 0x1B0, 7, 9)
 
     struct.pack_into(
         "<IHHIIIIII",
@@ -73,11 +77,13 @@ def _sample_wdr() -> bytes:
         0,
     )
     struct.pack_into("<III", virtual, 0x2C0, 0x6BB070, 3, _physical(108))
-    struct.pack_into("<IHBBQ", virtual, 0x340, 0x59, 36, 0, 4, 0x6755555555996996)
+    struct.pack_into("<IBBBBQ", virtual, 0x340, 0x59, 36, 0, 0, 4, 0x6755555555996996)
 
     struct.pack_into("<I", virtual, 0x380, 0x6BCA40)
     struct.pack_into("<IHH", virtual, 0x388, _virtual(0x3E0), 1, 1)
+    struct.pack_into("<IHH", virtual, 0x3C8, _virtual(0x4B0), 2, 2)
     struct.pack_into("<I", virtual, 0x3E0, _virtual(0x400))
+    struct.pack_into("<2I", virtual, 0x4B0, 0x11111111, 0x22222222)
 
     struct.pack_into("<I", virtual, 0x400, 0x6BC4EC)
     struct.pack_into("<3B", virtual, 0x408, 2, 0, 1)
@@ -145,7 +151,175 @@ def _sample_wdr_with_embedded_texture() -> bytes:
     return source[:12] + zlib.compress(payload)
 
 
+def _sample_wdr_with_skeleton() -> bytes:
+    source = _sample_wdr()
+    payload = bytearray(zlib.decompress(source[12:]))
+    virtual = memoryview(payload)[:0x1000]
+    struct.pack_into("<I", virtual, 0x0C, _virtual(0x740))
+    struct.pack_into(
+        "<5I4HI",
+        virtual,
+        0x740,
+        _virtual(0x800),
+        _virtual(0xB80),
+        _virtual(0xA00),
+        _virtual(0xA80),
+        _virtual(0xB00),
+        2,
+        3,
+        4,
+        5,
+        0x1234,
+    )
+    struct.pack_into("<IHH", virtual, 0x760, _virtual(0xB90), 2, 2)
+    struct.pack_into("<6I", virtual, 0x768, 1, 0xAABBCCDD, 10, 11, 12, 13)
+    struct.pack_into("<2i", virtual, 0xB80, -1, 0)
+    struct.pack_into("<4H", virtual, 0xB90, 0, 0, 40000, 1)
+
+    identity = (
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0, 1.0,
+    )
+    for base in (0xA00, 0xA80, 0xB00):
+        struct.pack_into("<16f", virtual, base, *identity)
+        struct.pack_into("<16f", virtual, base + 64, *identity)
+
+    root_name = b"root\0"
+    child_name = b"child\0"
+    virtual[0xBC0:0xBC0 + len(root_name)] = root_name
+    virtual[0xBD0:0xBD0 + len(child_name)] = child_name
+
+    def write_bone(
+        offset: int,
+        name_pointer: int,
+        flags: int,
+        index: int,
+        bone_id: int,
+        position: tuple[float, float, float, float],
+        *,
+        parent_pointer: int = 0,
+        child_pointer: int = 0,
+    ) -> None:
+        struct.pack_into("<II3I4HI", virtual, offset, name_pointer, flags, 0, child_pointer,
+                         parent_pointer, index, bone_id, 0, 0, 0)
+        struct.pack_into("<4f", virtual, offset + 32, *position)
+        struct.pack_into("<4f", virtual, offset + 64, 0.0, 0.0, 0.0, 1.0)
+        struct.pack_into("<4f", virtual, offset + 80, 1.0, 1.0, 1.0, 1.0)
+
+    write_bone(
+        0x800,
+        _virtual(0xBC0),
+        int(WdrBoneFlags.ROTATE_X | WdrBoneFlags.TRANSLATE_Y),
+        0,
+        0,
+        (1.0, 0.0, 0.0, 1.0),
+        child_pointer=_virtual(0x8E0),
+    )
+    write_bone(
+        0x8E0,
+        _virtual(0xBD0),
+        int(WdrBoneFlags.INVISIBLE),
+        1,
+        40000,
+        (0.0, 2.0, 0.0, 1.0),
+        parent_pointer=_virtual(0x800),
+    )
+    return source[:12] + zlib.compress(payload)
+
+
 class WdrTests(unittest.TestCase):
+    def test_reads_model_skinning_metadata_and_geometry_palette(self) -> None:
+        document = WdrDocument.from_bytes(_sample_wdr())
+        model = document.models[0]
+        geometry = document.geometries[0]
+
+        self.assertEqual(model.matrix_count, 2)
+        self.assertEqual(model.flags, 4)
+        self.assertEqual(model.model_type, 0xCD)
+        self.assertEqual(model.matrix_index, 2)
+        self.assertEqual(model.skin_flag, 1)
+        self.assertTrue(model.has_skin)
+        self.assertEqual(model.bone_index, 2)
+        self.assertEqual(geometry.bone_ids, (7, 9))
+        vertex = WdrVertex({WdrVertexSemantic.BLEND_INDICES: (1, 0, 3, 2)})
+        self.assertEqual(geometry.resolve_bone_indices(vertex), (9, 7, 3, 2))
+
+    def test_reads_vertex_buffer_and_layout_metadata(self) -> None:
+        geometry = WdrDocument.from_bytes(_sample_wdr()).geometries[0]
+        buffer = geometry.vertex_buffer
+
+        self.assertIsNotNone(buffer)
+        self.assertEqual(buffer.locked, 0)  # type: ignore[union-attr]
+        self.assertEqual(buffer.flags, 0)  # type: ignore[union-attr]
+        self.assertEqual(buffer.layout.fvf, 0x59)  # type: ignore[union-attr]
+        self.assertEqual(buffer.layout.fvf_size, 36)  # type: ignore[union-attr]
+        self.assertEqual(buffer.layout.dynamic_order, 0)  # type: ignore[union-attr]
+        self.assertEqual(buffer.layout.channel_count, 4)  # type: ignore[union-attr]
+        self.assertEqual(buffer.data, buffer.locked_data)  # type: ignore[union-attr]
+
+    def test_reads_model_and_per_geometry_bounds_without_offset_shift(self) -> None:
+        source = _sample_wdr()
+        payload = bytearray(zlib.decompress(source[12:]))
+        struct.pack_into("<IHH", payload, 0x144, _virtual(0x160), 2, 2)
+        struct.pack_into("<2I", payload, 0x160, _virtual(0x200), _virtual(0x200))
+        struct.pack_into("<I", payload, 0x150, _virtual(0x1D0))
+        struct.pack_into("<H", payload, 0x15A, 2)
+        struct.pack_into("<4f", payload, 0x180, 10.0, 0.0, 0.0, 10.0)
+        struct.pack_into("<4f", payload, 0x190, 1.0, 0.0, 0.0, 1.0)
+        struct.pack_into("<4f", payload, 0x1A0, 2.0, 0.0, 0.0, 2.0)
+        struct.pack_into("<2H", payload, 0x1D0, 0, 0)
+        document = WdrDocument.from_bytes(source[:12] + zlib.compress(payload))
+
+        model = document.models[0]
+        self.assertEqual(tuple(model.bounding_sphere), (10.0, 0.0, 0.0, 10.0))  # type: ignore[arg-type]
+        self.assertEqual(tuple(model.geometry_bounds[0]), (1.0, 0.0, 0.0, 1.0))  # type: ignore[arg-type]
+        self.assertEqual(tuple(model.geometry_bounds[1]), (2.0, 0.0, 0.0, 2.0))  # type: ignore[arg-type]
+        self.assertEqual(tuple(document.geometries[0].bounding_sphere), (2.0, 0.0, 0.0, 2.0))  # type: ignore[arg-type]
+
+    def test_reads_skeleton_matrices_flags_and_bind_transforms(self) -> None:
+        skeleton = WdrDocument.from_bytes(_sample_wdr_with_skeleton()).drawable.skeleton
+
+        self.assertIsNotNone(skeleton)
+        self.assertEqual(skeleton.parent_indices, (-1, 0))  # type: ignore[union-attr]
+        self.assertEqual(skeleton.translation_dof_count, 3)  # type: ignore[union-attr]
+        self.assertEqual(skeleton.rotation_dof_count, 4)  # type: ignore[union-attr]
+        self.assertEqual(skeleton.scale_dof_count, 5)  # type: ignore[union-attr]
+        self.assertEqual(skeleton.reference_count, 1)  # type: ignore[union-attr]
+        self.assertEqual(skeleton.signature, 0xAABBCCDD)  # type: ignore[union-attr]
+        self.assertEqual(skeleton.bone_ids[1].bone_id, 40000)  # type: ignore[union-attr]
+        root, child = skeleton.bones  # type: ignore[union-attr]
+        self.assertEqual(root.flags, WdrBoneFlags.ROTATE_X | WdrBoneFlags.TRANSLATE_Y)
+        self.assertEqual(child.flags, WdrBoneFlags.INVISIBLE)
+        self.assertEqual(child.parent_index, 0)
+        self.assertEqual(tuple(child.absolute_transform.translation), (1.0, 2.0, 0.0))
+        self.assertEqual(tuple(child.inverse_bind_transform.translation), (-1.0, -2.0, 0.0))
+        for actual, expected in zip(child.skin_transform, child.skin_transform.identity(), strict=True):
+            self.assertAlmostEqual(actual, expected)
+
+    def test_names_all_shader_parameters_seen_in_stock_map_wdrs(self) -> None:
+        expected = {
+            0xFC2BC0AA: "shadow_map_resolution",
+            0xF07391A4: "facet_mask",
+            0xD79BFC1E: "global_animation_uv_0",
+            0xBA54C190: "global_animation_uv_1",
+            0x104E0B0E: "z_shift_scale",
+            0xA38C0E4A: "z_shift",
+            0x0C451B1A: "fade_thickness",
+            0x1948C16C: "material_diffuse",
+            0x00E67F02: "imposter_direction",
+            0x1C8B0AFF: "normal_table",
+            0x1105818B: "alternate_remap",
+            0xDBB6BF5B: "ambient_decal_mask",
+        }
+        from fourfury.wdr import WDR_SHADER_PARAMETER_NAMES
+
+        self.assertEqual(
+            {key: WDR_SHADER_PARAMETER_NAMES[key] for key in expected},
+            expected,
+        )
+
     def test_reads_and_resolves_embedded_texture_dictionary(self) -> None:
         document = WdrDocument.from_bytes(_sample_wdr_with_embedded_texture())
 
@@ -190,6 +364,10 @@ class WdrTests(unittest.TestCase):
         self.assertEqual(document.shaders[0].parameters[0].texture.name, "sample")  # type: ignore[union-attr]
         self.assertEqual(document.shaders[0].parameters[1].name, "specular_factor")
         self.assertEqual(document.shaders[0].parameters[1].value.x, 35.0)  # type: ignore[union-attr]
+        self.assertEqual(
+            document.drawable.shader_group.reserved_data,  # type: ignore[union-attr]
+            (0x11111111, 0x22222222),
+        )
 
         light = document.drawable.lights[0]
         self.assertEqual(light.light_type, WdrLightType.POINT)
