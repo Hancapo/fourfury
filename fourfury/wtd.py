@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import os
 import struct
-import tempfile
 from dataclasses import dataclass, field
 from enum import IntEnum
 from pathlib import Path
 from typing import BinaryIO
 
+from ._utils import atomic_write
 from .rsc import RSC5_PHYSICAL_BASE, RSC5_VIRTUAL_BASE, Rsc5Resource, rsc5_pointer_offset
 
 
@@ -242,21 +241,7 @@ class WtdDocument:
         return self.resource.to_bytes()
 
     def save(self, path: str | Path) -> None:
-        target = Path(path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        temporary: Path | None = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                "wb", dir=target.parent, prefix=f".{target.name}.", suffix=".tmp", delete=False
-            ) as stream:
-                temporary = Path(stream.name)
-                stream.write(self.to_bytes())
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, target)
-        finally:
-            if temporary is not None and temporary.exists():
-                temporary.unlink()
+        atomic_write(path, self.to_bytes())
 
 
 def load_wtd(source: str | Path | bytes | BinaryIO) -> WtdDocument:

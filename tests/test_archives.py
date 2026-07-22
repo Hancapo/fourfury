@@ -2,13 +2,55 @@ from __future__ import annotations
 
 import hashlib
 import struct
+import tempfile
 import unittest
 import zlib
+from pathlib import Path
 
 from fourfury import GTAIVCrypto, GTAIV_AES_KEY, GTAIV_KEY_SHA1, ImgArchive, RpfArchive
 
 
 class ArchiveTests(unittest.TestCase):
+    def test_archive_indexes_update_incrementally(self) -> None:
+        img = ImgArchive.empty()
+        first = img.add_file("first.bin", b"old")
+        self.assertIs(img.find_entry("FIRST.BIN"), first)
+        self.assertIs(img.add_file("FIRST.BIN", b"new"), first)
+        self.assertEqual(len(img.entries), 1)
+        self.assertEqual(first.read(), b"new")
+        self.assertTrue(img.remove("First.Bin"))
+        self.assertIsNone(img.find_entry("first.bin"))
+
+        rpf = RpfArchive.empty()
+        directory = rpf.add_directory("data/maps")
+        entry = rpf.add_file("data/maps/city.bin", b"city")
+        self.assertIs(rpf.find_entry("DATA/MAPS"), directory)
+        self.assertIs(rpf.find_entry("DATA/MAPS/CITY.BIN"), entry)
+        self.assertIs(rpf.add_file("DATA/MAPS/CITY.BIN", b"updated"), entry)
+        self.assertEqual(len(directory.files), 1)
+        self.assertEqual(entry.read(), b"updated")
+
+    def test_rpf_rejects_file_directory_name_collisions(self) -> None:
+        archive = RpfArchive.empty()
+        archive.add_file("data", b"file")
+        with self.assertRaises(NotADirectoryError):
+            archive.add_directory("data/maps")
+
+    def test_archive_save_creates_parent_and_replaces_destination(self) -> None:
+        archive = ImgArchive.empty()
+        archive.add_file("example.bin", b"payload")
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "nested" / "archive.img"
+            archive.save(target)
+            target.write_bytes(b"old")
+            archive.save(target)
+
+            with ImgArchive.from_path(target) as saved:
+                entry = saved.find_entry("example.bin")
+                self.assertIsNotNone(entry)
+                self.assertEqual(entry.read(), b"payload")  # type: ignore[union-attr]
+            self.assertEqual(list(target.parent.glob(f".{target.name}.*.tmp")), [])
+
     def test_rpf2_round_trip_with_directories_and_case_insensitive_lookup(self) -> None:
         archive = RpfArchive.empty("example")
         archive.add_file("data/readme.txt", b"hello GTA IV")

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import os
 import struct
-import tempfile
 from dataclasses import dataclass, field
 from enum import IntFlag
 from pathlib import Path
 from typing import BinaryIO, ClassVar, Iterator, Literal, cast
 
+from ._utils import atomic_write
 
 WPL_VERSION = 3
 WPL_HEADER_SIZE = 68
@@ -515,19 +514,7 @@ class WplDocument:
         return struct.pack("<17I", self.version, *counts) + payload + self.trailing_data
 
     def save(self, path: str | Path) -> None:
-        target = Path(path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        temporary: Path | None = None
-        try:
-            with tempfile.NamedTemporaryFile("wb", dir=target.parent, prefix=f".{target.name}.", suffix=".tmp", delete=False) as stream:
-                temporary = Path(stream.name)
-                stream.write(self.to_bytes())
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, target)
-        finally:
-            if temporary is not None and temporary.exists():
-                temporary.unlink()
+        atomic_write(path, self.to_bytes())
 
 
 def load_wpl(source: str | Path | bytes | BinaryIO) -> WplDocument:
