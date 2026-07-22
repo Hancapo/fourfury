@@ -5,7 +5,7 @@ import unittest
 import fourfury.wbn as wbn_module
 from fourfury import WbnBvhGeometry, WbnComposite, WbnDocument
 
-from test_wbn import _sample_wbn
+from tests.test_wbn import _sample_wbn
 
 
 _DECODER_NAMES = (
