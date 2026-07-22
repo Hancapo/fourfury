@@ -68,6 +68,18 @@ from .nod import (
     explain_node_flags,
     load_nod,
 )
+from .path import (
+    PathEdge,
+    PathGraph,
+    PathMetadataValue,
+    PathNode,
+    PathNodeId,
+    PathNodeKey,
+    PathNodeKind,
+    PathSourceMetadata,
+    PathVector3,
+    combine_path_graphs,
+)
 from .rpf import (
     RPF2_MAGIC,
     RPF3_MAGIC,
@@ -236,7 +248,9 @@ __all__ = [
     "NOD_LINK_COUNT_SHIFT", "NOD_LINK_SIZE", "NOD_NODE_FLAG_INFO", "NOD_NODE_SIZE",
     "NOD_PATH_WIDTH_SCALE", "NOD_XY_SCALE", "NOD_Z_SCALE", "NodDocument",
     "NodFlagConfidence", "NodLink", "NodNode", "NodNodeFlagInfo", "NodNodeFlags",
-    "NodNodeKind", "NodVector3",
+    "NodNodeKind", "NodVector3", "PathEdge", "PathGraph", "PathMetadataValue",
+    "PathNode", "PathNodeId", "PathNodeKey", "PathNodeKind", "PathSourceMetadata",
+    "PathVector3",
     "RPF2_MAGIC", "RPF_ENCRYPTED", "RPF3_MAGIC", "RPF_HEADER_SIZE", "RSC5_HEADER_SIZE",
     "RSC5_MAGIC", "RSC5_PHYSICAL_BASE", "RSC5_TEXTURE_DICTIONARY_SIZE", "RSC5_TEXTURE_SIZE",
     "RSC5_VIRTUAL_BASE", "RpfArchive",
@@ -266,7 +280,7 @@ __all__ = [
     "WPL_INSTANCE_FLAG_INFO", "WPL_SECTION_SIZES", "WPL_VERSION", "WplBlock", "WplCull",
     "WplDocument", "WplGarage", "WplInstance", "WplInstanceFlagInfo", "WplInstanceFlags",
     "WplLodCull", "WplParkedCar", "WplStrBig", "WplTimeCycleModifier", "WplZone",
-    "create_gtxd", "create_ide", "create_img", "create_rpf", "create_wpl", "joaat",
+    "combine_path_graphs", "create_gtxd", "create_ide", "create_img", "create_rpf", "create_wpl", "joaat",
     "explain_instance_flags", "explain_node_flags",
     "extract_aes_key", "load_ide", "load_img", "load_materials", "load_nod", "load_rpf", "load_wbn",
     "load_gtxd", "load_wbd", "load_wdr", "load_wnv", "load_wpl", "load_wtd", "read_rsc5_texture_dictionary",
