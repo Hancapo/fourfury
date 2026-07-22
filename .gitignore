@@ -1,5 +1,9 @@
 __pycache__/
 *.py[cod]
+*.pyd
+*.so
+*.pdb
+*.lib
 .pytest_cache/
 build/
 dist/

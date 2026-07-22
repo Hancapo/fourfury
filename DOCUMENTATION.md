@@ -11,6 +11,7 @@ has no target-game dependency.
 ## Contents
 
 - [Supported formats](#supported-formats)
+- [Native acceleration](#native-acceleration)
 - [Development installation](#development-installation)
 - [Opening stock archives](#opening-stock-archives)
 - [Creating archives](#creating-archives)
@@ -40,6 +41,17 @@ has no target-game dependency.
 - RSC5 resources inside RPF and IMG archives: resource headers and flags are preserved, and trailing sector padding after the zlib stream is removed when extracting from IMG archives.
 
 Archive writing is intentionally unencrypted because GTA IV accepts open modified archives. The embedded key is used only to read encrypted stock archives.
+
+## Native acceleration
+
+FourFury includes an optional C++17 extension for performance-sensitive kernels.
+Source installations attempt to compile it when a compatible compiler is available;
+if compilation is unavailable, installation continues with the equivalent Python
+fallbacks. The native module uses CPython's stable 3.11 ABI.
+
+On Windows, the native AES kernel keeps the cached BCrypt key and all sixteen GTA IV
+decryption passes inside one native call. No native APIs are exposed as part of the
+public compatibility contract; applications should continue using `GTAIVCrypto`.
 
 ## Development installation
 

@@ -4,9 +4,17 @@ import ctypes
 import hashlib
 import mmap
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Final
+
+try:
+    from ._native import aes16_decrypt as _native_aes16_decrypt
+    from ._native import create_aes_context as _create_native_aes_context
+except ImportError:
+    _native_aes16_decrypt = None
+    _create_native_aes_context = None
 
 
 GTAIV_KEY_SHA1: Final[bytes] = bytes.fromhex("DEA375EF1E6EF2223A1221C2C575C47BF17EFA5E")
@@ -138,6 +146,7 @@ class _WindowsAesEcbDecryptor:
 class GTAIVCrypto:
     aes_key: bytes = GTAIV_AES_KEY
     _decrypt_once: Callable[[bytes], bytes] | None = field(default=None, init=False, repr=False)
+    _native_context: object | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.aes_key = bytes(self.aes_key)
@@ -152,6 +161,14 @@ class GTAIVCrypto:
         """Decrypt aligned blocks with GTA IV's sixteen-pass AES scheme."""
         if not data:
             return b""
+        if (
+            sys.platform == "win32"
+            and _create_native_aes_context is not None
+            and _native_aes16_decrypt is not None
+        ):
+            if self._native_context is None:
+                self._native_context = _create_native_aes_context(self.aes_key)
+            return _native_aes16_decrypt(self._native_context, data)
         aligned = len(data) - len(data) % 16
         if aligned == 0:
             return bytes(data)
