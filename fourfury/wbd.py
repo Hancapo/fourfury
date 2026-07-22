@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-import os
 import struct
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import BinaryIO, Iterator
 
+from ._utils import atomic_write
 from .materials import MaterialCatalog
 from .rsc import RSC5_VIRTUAL_BASE, Rsc5Resource, rsc5_pointer_offset
-from .wbn import WbnBound, WbnComposite, WbnGeometry, _WbnParser
+from .wbn import WbnBound, WbnGeometry, _WbnParser, _iter_bounds, _iter_geometries
 
 
 WBD_RESOURCE_VERSION = 0x20
@@ -150,24 +149,15 @@ class WbdDocument:
         return None if entry is None else entry.bound
 
     def iter_bounds(self) -> Iterator[WbnBound]:
-        pending = list(reversed(self.bounds))
-        seen: set[int] = set()
-        while pending:
-            bound = pending.pop()
-            if bound._offset in seen:
-                continue
-            seen.add(bound._offset)
-            yield bound
-            if isinstance(bound, WbnComposite):
-                pending.extend(reversed(bound.children))
+        yield from _iter_bounds(entry.bound for entry in self.entries)
 
     @property
     def geometries(self) -> list[WbnGeometry]:
-        return [bound for bound in self.iter_bounds() if isinstance(bound, WbnGeometry)]
+        return list(_iter_geometries(self.iter_bounds()))
 
     def bind_materials(self, catalog: MaterialCatalog) -> "WbdDocument":
         self.material_catalog = catalog
-        for geometry in self.geometries:
+        for geometry in _iter_geometries(self.iter_bounds()):
             for material in geometry.materials:
                 material._catalog = catalog
         return self
@@ -197,21 +187,7 @@ class WbdDocument:
         return self.resource.to_bytes(virtual_data=bytes(virtual))
 
     def save(self, path: str | Path) -> None:
-        target = Path(path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        temporary: Path | None = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                "wb", dir=target.parent, prefix=f".{target.name}.", suffix=".tmp", delete=False
-            ) as stream:
-                temporary = Path(stream.name)
-                stream.write(self.to_bytes())
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, target)
-        finally:
-            if temporary is not None and temporary.exists():
-                temporary.unlink()
+        atomic_write(path, self.to_bytes())
 
 
 def load_wbd(

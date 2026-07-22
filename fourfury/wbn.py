@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import math
-import os
 import struct
-import tempfile
 from dataclasses import dataclass, field
 from enum import IntEnum, IntFlag
 from pathlib import Path
-from typing import BinaryIO, Iterator
+from typing import BinaryIO, Iterable, Iterator
 
+from ._utils import atomic_write
 from .materials import MaterialCatalog, MaterialDefinition
 from .rsc import Rsc5Resource, rsc5_pointer_offset
 
@@ -526,6 +525,24 @@ class WbnComposite(WbnBound):
             child._write(data, visited)
 
 
+def _iter_bounds(roots: Iterable[WbnBound]) -> Iterator[WbnBound]:
+    pending = list(roots)
+    pending.reverse()
+    seen: set[int] = set()
+    while pending:
+        bound = pending.pop()
+        if bound._offset in seen:
+            continue
+        seen.add(bound._offset)
+        yield bound
+        if isinstance(bound, WbnComposite):
+            pending.extend(reversed(bound.children))
+
+
+def _iter_geometries(bounds: Iterable[WbnBound]) -> Iterator[WbnGeometry]:
+    return (bound for bound in bounds if isinstance(bound, WbnGeometry))
+
+
 class _WbnParser:
     def __init__(self, data: bytes):
         self.data = data
@@ -726,26 +743,17 @@ class WbnDocument:
         """Resolve every WBN material ID through a materials.dat catalog."""
 
         self.material_catalog = catalog
-        for geometry in self.geometries:
+        for geometry in _iter_geometries(self):
             for material in geometry.materials:
                 material._catalog = catalog
         return self
 
     def __iter__(self) -> Iterator[WbnBound]:
-        pending = [self.root]
-        seen: set[int] = set()
-        while pending:
-            bound = pending.pop()
-            if bound._offset in seen:
-                continue
-            seen.add(bound._offset)
-            yield bound
-            if isinstance(bound, WbnComposite):
-                pending.extend(reversed(bound.children))
+        yield from _iter_bounds((self.root,))
 
     @property
     def geometries(self) -> list[WbnGeometry]:
-        return [bound for bound in self if isinstance(bound, WbnGeometry)]
+        return list(_iter_geometries(self))
 
     def to_bytes(self) -> bytes:
         virtual_data = bytearray(self.resource.virtual_data)
@@ -753,19 +761,7 @@ class WbnDocument:
         return self.resource.to_bytes(virtual_data=bytes(virtual_data))
 
     def save(self, path: str | Path) -> None:
-        target = Path(path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        temporary: Path | None = None
-        try:
-            with tempfile.NamedTemporaryFile("wb", dir=target.parent, prefix=f".{target.name}.", suffix=".tmp", delete=False) as stream:
-                temporary = Path(stream.name)
-                stream.write(self.to_bytes())
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, target)
-        finally:
-            if temporary is not None and temporary.exists():
-                temporary.unlink()
+        atomic_write(path, self.to_bytes())
 
 
 def load_wbn(

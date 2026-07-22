@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import os
 import struct
-import tempfile
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import BinaryIO, Iterator
 
-from ._utils import SECTOR_SIZE, align, normalize_key, safe_destination
+from ._utils import SECTOR_SIZE, align, atomic_write, normalize_key, safe_destination
 from .crypto import GTAIVCrypto
 
 
@@ -201,7 +199,8 @@ class ImgArchive:
     ) -> ImgEntry:
         if not name or "/" in name or "\\" in name:
             raise ValueError("IMG3 entries use flat file names")
-        entry = self.find_entry(name)
+        key = normalize_key(name)
+        entry = self._index.get(key)
         if entry is None:
             entry = ImgEntry(name=name, _archive=self)
             self.entries.append(entry)
@@ -212,7 +211,7 @@ class ImgArchive:
         entry.table_value = resource_flags & 0xFFFFFFFF if resource_flags else entry.size
         entry.used_blocks = align(entry.size) // SECTOR_SIZE
         entry.padding = 0
-        self._rebuild_index()
+        self._index[key] = entry
         return entry
 
     def remove(self, name: str | Path) -> bool:
@@ -220,7 +219,7 @@ class ImgArchive:
         if entry is None:
             return False
         self.entries.remove(entry)
-        self._rebuild_index()
+        self._index.pop(normalize_key(entry.name), None)
         return True
 
     def to_bytes(self) -> bytes:
@@ -252,19 +251,7 @@ class ImgArchive:
         return bytes(output)
 
     def save(self, path: str | Path) -> None:
-        target = Path(path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        temporary: Path | None = None
-        try:
-            with tempfile.NamedTemporaryFile("wb", dir=target.parent, prefix=f".{target.name}.", suffix=".tmp", delete=False) as stream:
-                temporary = Path(stream.name)
-                stream.write(self.to_bytes())
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, target)
-        finally:
-            if temporary is not None and temporary.exists():
-                temporary.unlink()
+        atomic_write(path, self.to_bytes())
 
     def extract(self, output_dir: str | Path) -> list[Path]:
         root = Path(output_dir)

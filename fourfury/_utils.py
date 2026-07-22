@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import tempfile
 import zlib
 from pathlib import Path
 
@@ -27,6 +29,30 @@ def safe_destination(root: Path, member: str | Path) -> Path:
     if not destination.is_relative_to(base):
         raise ValueError(f"archive member escapes the extraction directory: {member}")
     return destination
+
+
+def atomic_write(path: str | Path, data: bytes) -> None:
+    """Write *data* beside the destination and atomically replace it."""
+
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "wb",
+            dir=target.parent,
+            prefix=f".{target.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
 
 
 def decompress_deflate(data: bytes) -> bytes:

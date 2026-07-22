@@ -1,13 +1,20 @@
 from __future__ import annotations
 
-import os
 import struct
-import tempfile
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import BinaryIO, Iterator
 
-from ._utils import SECTOR_SIZE, align, decompress_deflate, normalize_key, normalize_path, safe_destination
+from ._utils import (
+    SECTOR_SIZE,
+    align,
+    atomic_write,
+    decompress_deflate,
+    normalize_key,
+    normalize_path,
+    safe_destination,
+)
 from .crypto import GTAIVCrypto
 
 
@@ -274,16 +281,27 @@ class RpfArchive:
         return data
 
     def add_directory(self, path: str | Path) -> RpfDirectoryEntry:
+        normalized = normalize_path(path)
         current = self.root
-        current_path = ""
-        for part in normalize_path(path).split("/") if normalize_path(path) else []:
-            current_path = f"{current_path}/{part}".strip("/")
-            child = next((item for item in current.children if isinstance(item, RpfDirectoryEntry) and item.name.casefold() == part.casefold()), None)
-            if child is None:
-                child = RpfDirectoryEntry(name=part, path=current_path, parent=current, _archive=self)
+        for part in normalized.split("/") if normalized else ():
+            existing = next(
+                (item for item in current.children if item.name.casefold() == part.casefold()),
+                None,
+            )
+            if isinstance(existing, RpfFileEntry):
+                raise NotADirectoryError(existing.path)
+            child = existing
+            if not isinstance(child, RpfDirectoryEntry):
+                child_path = f"{current.path}/{part}".strip("/")
+                child = RpfDirectoryEntry(
+                    name=part,
+                    path=child_path,
+                    parent=current,
+                    _archive=self,
+                )
                 current.children.append(child)
+                self._index[normalize_key(child.path)] = child
             current = child
-        self._rebuild_index()
         return current
 
     def add_file(self, path: str | Path, data: bytes, *, resource_type: int = 0) -> RpfFileEntry:
@@ -307,14 +325,14 @@ class RpfArchive:
             entry.uncompressed_size = struct.unpack_from("<I", data, 8)[0]
         else:
             entry.uncompressed_size = len(data)
-        self._rebuild_index()
+        self._index[normalize_key(normalized)] = entry
         return entry
 
     def _flatten_for_write(self) -> list[RpfEntry]:
         entries: list[RpfEntry] = [self.root]
-        pending: list[RpfDirectoryEntry] = [self.root]
+        pending = deque([self.root])
         while pending:
-            directory = pending.pop(0)
+            directory = pending.popleft()
             directory.content_index = len(entries)
             directory.content_count = len(directory.children)
             entries.extend(directory.children)
@@ -371,19 +389,7 @@ class RpfArchive:
         return bytes(output)
 
     def save(self, path: str | Path) -> None:
-        target = Path(path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        temporary: Path | None = None
-        try:
-            with tempfile.NamedTemporaryFile("wb", dir=target.parent, prefix=f".{target.name}.", suffix=".tmp", delete=False) as stream:
-                temporary = Path(stream.name)
-                stream.write(self.to_bytes())
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, target)
-        finally:
-            if temporary is not None and temporary.exists():
-                temporary.unlink()
+        atomic_write(path, self.to_bytes())
 
     def extract(self, output_dir: str | Path) -> list[Path]:
         root = Path(output_dir)
