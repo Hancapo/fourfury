@@ -7,12 +7,39 @@ from pathlib import Path
 from typing import BinaryIO, Iterator
 
 from ._utils import atomic_write
+from .model import (
+    ModelAabb,
+    ModelAsset,
+    ModelBone,
+    ModelBoundingSphere,
+    ModelColorChannel,
+    ModelLight,
+    ModelLightType,
+    ModelLod,
+    ModelMaterial,
+    ModelMaterialParameter,
+    ModelMesh,
+    ModelObject,
+    ModelParameterKind,
+    ModelPrimitive,
+    ModelSkeleton,
+    ModelTexCoordChannel,
+    ModelTexture,
+    ModelTextureFormat,
+    ModelTextureKind,
+    ModelTextureReference,
+)
 from .rsc import (
     RSC5_PHYSICAL_BASE,
     RSC5_VIRTUAL_BASE,
     Rsc5Resource,
 )
-from .wtd import Rsc5Texture, Rsc5TextureDictionary, read_rsc5_texture_dictionary
+from .wtd import (
+    Rsc5Texture,
+    Rsc5TextureDictionary,
+    Rsc5TextureFormat,
+    read_rsc5_texture_dictionary,
+)
 
 
 WDR_RESOURCE_VERSION = 0x6E
@@ -420,6 +447,30 @@ class WdrShaderParameter:
     def is_texture(self) -> bool:
         return self.parameter_type == 0
 
+    def to_model_parameter(self) -> ModelMaterialParameter:
+        """Project this RAGE parameter into the neutral model contract."""
+
+        texture = (
+            None
+            if self.texture is None
+            else ModelTextureReference(self.texture.name, self.texture.file_name)
+        )
+        if isinstance(self.value, WdrVector4):
+            value = tuple(self.value)
+        elif self.value is not None:
+            value = tuple(tuple(item) for item in self.value)
+        else:
+            value = None
+        return ModelMaterialParameter(
+            name_hash=self.name_hash,
+            kind=ModelParameterKind.TEXTURE
+            if self.is_texture
+            else ModelParameterKind.VALUE,
+            name=WDR_SHADER_PARAMETER_NAMES.get(self.name_hash),
+            value=value,
+            texture=texture,
+        )
+
 
 @dataclass(slots=True)
 class WdrShader:
@@ -435,6 +486,23 @@ class WdrShader:
     reserved: tuple[int, ...]
     _pointer: int = field(repr=False, compare=False)
 
+    def to_model_material(self, *, index: int | None = None) -> ModelMaterial:
+        """Return a target-format-independent material description."""
+
+        material_index = self.shader_index if index is None else int(index)
+        name = self.name or Path(self.file_name).stem or f"material_{material_index}"
+        return ModelMaterial(
+            index=material_index,
+            name=name,
+            shader_name=self.name,
+            shader_file=self.file_name,
+            render_bucket=self.draw_bucket,
+            parameters=tuple(
+                parameter.to_model_parameter() for parameter in self.parameters
+            ),
+            shader_hash=self.name_hash,
+        )
+
 
 @dataclass(slots=True)
 class WdrShaderGroup:
@@ -445,6 +513,83 @@ class WdrShaderGroup:
     reserved_data: tuple[int, ...]
     texture_dictionary: Rsc5TextureDictionary | None = field(repr=False, compare=False)
     _pointer: int = field(repr=False, compare=False)
+
+
+def _attribute_channel(
+    vertices: tuple[WdrVertex, ...],
+    semantic: WdrVertexSemantic,
+) -> tuple[VertexValue, ...]:
+    values = tuple(vertex.get(semantic) for vertex in vertices)
+    present = tuple(value for value in values if value is not None)
+    if not present:
+        return ()
+    if len(present) != len(vertices):
+        raise ValueError(
+            f"WDR vertex semantic {semantic.name} is present only on some vertices"
+        )
+    return present
+
+
+def _components(value: VertexValue) -> tuple[float | int, ...]:
+    return value if isinstance(value, tuple) else (value,)
+
+
+def _vector2(value: VertexValue, label: str) -> tuple[float, float]:
+    components = _components(value)
+    if len(components) < 2:
+        raise ValueError(f"{label} requires at least two components")
+    return float(components[0]), float(components[1])
+
+
+def _vector3(value: VertexValue, label: str) -> tuple[float, float, float]:
+    components = _components(value)
+    if len(components) < 3:
+        raise ValueError(f"{label} requires at least three components")
+    return float(components[0]), float(components[1]), float(components[2])
+
+
+def _vector4(
+    value: VertexValue,
+    label: str,
+    *,
+    default_w: float = 0.0,
+) -> tuple[float, float, float, float]:
+    components = _components(value)
+    if not components:
+        raise ValueError(f"{label} has no components")
+    result = [float(component) for component in components[:4]]
+    while len(result) < 4:
+        result.append(default_w if len(result) == 3 else 0.0)
+    return tuple(result)  # type: ignore[return-value]
+
+
+def _indices4(value: VertexValue) -> tuple[int, int, int, int]:
+    result = [int(component) for component in _components(value)[:4]]
+    result.extend([0] * (4 - len(result)))
+    return tuple(result)  # type: ignore[return-value]
+
+
+def _weights4(value: VertexValue) -> tuple[float, float, float, float]:
+    components = _components(value)[:4]
+    divisor = (
+        255.0
+        if components and all(isinstance(item, int) for item in components)
+        else 1.0
+    )
+    result = [float(component) / divisor for component in components]
+    result.extend([0.0] * (4 - len(result)))
+    return tuple(result)  # type: ignore[return-value]
+
+
+def _color4(value: VertexValue) -> tuple[float, float, float, float]:
+    components = _components(value)
+    if len(components) < 3:
+        raise ValueError("WDR vertex color requires at least three components")
+    divisor = 255.0 if all(isinstance(item, int) for item in components) else 1.0
+    result = [float(component) / divisor for component in components[:4]]
+    if len(result) == 3:
+        result.append(1.0)
+    return tuple(result)  # type: ignore[return-value]
 
 
 @dataclass(slots=True)
@@ -511,6 +656,94 @@ class WdrGeometry:
             for index in (int(item) for item in local_indices)
         )
 
+    def to_model_mesh(self) -> ModelMesh:
+        """Decode this geometry into immutable, renderer-neutral mesh data."""
+
+        if self.primitive_type != WdrPrimitiveType.TRIANGLE_LIST:
+            raise ValueError(f"unsupported WDR primitive type: {self.primitive_type}")
+        vertices = self.vertices
+        if self.vertex_count and len(vertices) != self.vertex_count:
+            raise ValueError("WDR geometry has no complete decoded vertex stream")
+
+        positions = tuple(
+            _vector3(value, "WDR position")
+            for value in _attribute_channel(vertices, WdrVertexSemantic.POSITION)
+        )
+        if vertices and len(positions) != len(vertices):
+            raise ValueError("WDR geometry has vertices without positions")
+        normals = tuple(
+            _vector3(value, "WDR normal")
+            for value in _attribute_channel(vertices, WdrVertexSemantic.NORMAL)
+        )
+        tangents = tuple(
+            _vector4(value, "WDR tangent", default_w=1.0)
+            for value in _attribute_channel(vertices, WdrVertexSemantic.TANGENT)
+        )
+        binormals = tuple(
+            _vector3(value, "WDR binormal")
+            for value in _attribute_channel(vertices, WdrVertexSemantic.BINORMAL)
+        )
+        texcoord_channels: list[ModelTexCoordChannel] = []
+        for index in range(8):
+            semantic = WdrVertexSemantic(WdrVertexSemantic.TEXCOORD_0 + index)
+            values = _attribute_channel(vertices, semantic)
+            if values:
+                texcoord_channels.append(
+                    ModelTexCoordChannel(
+                        index=index,
+                        values=tuple(
+                            _vector2(value, f"WDR texcoord {index}") for value in values
+                        ),
+                    )
+                )
+        color_channels: list[ModelColorChannel] = []
+        for index, semantic in enumerate(
+            (WdrVertexSemantic.COLOR_0, WdrVertexSemantic.COLOR_1)
+        ):
+            values = _attribute_channel(vertices, semantic)
+            if values:
+                color_channels.append(
+                    ModelColorChannel(
+                        index=index,
+                        values=tuple(_color4(value) for value in values),
+                    )
+                )
+        blend_weights = tuple(
+            _weights4(value)
+            for value in _attribute_channel(vertices, WdrVertexSemantic.BLEND_WEIGHTS)
+        )
+        blend_indices = tuple(
+            _indices4(value)
+            for value in _attribute_channel(vertices, WdrVertexSemantic.BLEND_INDICES)
+        )
+        sphere = (
+            None
+            if self.bounding_sphere is None
+            else ModelBoundingSphere(
+                center=(
+                    self.bounding_sphere.x,
+                    self.bounding_sphere.y,
+                    self.bounding_sphere.z,
+                ),
+                radius=self.bounding_sphere.w,
+            )
+        )
+        return ModelMesh(
+            positions=positions,
+            indices=tuple(int(value) for value in self.indices[: self.index_count]),
+            material_index=self.shader_index,
+            primitive=ModelPrimitive.TRIANGLES,
+            normals=normals,
+            tangents=tangents,
+            binormals=binormals,
+            texcoord_channels=tuple(texcoord_channels),
+            color_channels=tuple(color_channels),
+            blend_weights=blend_weights,
+            blend_indices=blend_indices,
+            bone_palette=self.bone_ids,
+            bounding_sphere=sphere,
+        )
+
 
 @dataclass(slots=True)
 class WdrDrawableModel:
@@ -546,6 +779,36 @@ class WdrDrawableModel:
             | (self.matrix_index << 24)
         )
 
+    def to_model_object(
+        self,
+        *,
+        index: int,
+        has_skeleton: bool = False,
+    ) -> ModelObject:
+        sphere = (
+            None
+            if self.bounding_sphere is None
+            else ModelBoundingSphere(
+                center=(
+                    self.bounding_sphere.x,
+                    self.bounding_sphere.y,
+                    self.bounding_sphere.z,
+                ),
+                radius=self.bounding_sphere.w,
+            )
+        )
+        return ModelObject(
+            index=int(index),
+            meshes=tuple(geometry.to_model_mesh() for geometry in self.geometries),
+            bounding_sphere=sphere,
+            bone_index=(
+                self.matrix_index if has_skeleton and not self.has_skin else None
+            ),
+            is_skinned=self.has_skin,
+            bone_count=self.matrix_count,
+            flags=self.flags,
+        )
+
 
 @dataclass(slots=True)
 class WdrDrawableLod:
@@ -558,6 +821,22 @@ class WdrDrawableLod:
     @property
     def geometries(self) -> tuple[WdrGeometry, ...]:
         return tuple(geometry for model in self.models for geometry in model.geometries)
+
+    def to_model_lod(
+        self,
+        *,
+        draw_bucket_mask: int = 0,
+        has_skeleton: bool = False,
+    ) -> ModelLod:
+        return ModelLod(
+            level=self.level.name.casefold(),
+            distance=self.distance,
+            objects=tuple(
+                model.to_model_object(index=index, has_skeleton=has_skeleton)
+                for index, model in enumerate(self.models)
+            ),
+            draw_bucket_mask=int(draw_bucket_mask),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -653,6 +932,27 @@ class WdrSkeleton:
     reserved: tuple[int, int, int, int]
     _pointer: int = field(repr=False, compare=False)
 
+    def to_model_skeleton(self) -> ModelSkeleton:
+        """Project the hierarchy and bind transforms without changing coordinates."""
+
+        return ModelSkeleton(
+            bones=tuple(
+                ModelBone(
+                    index=bone.index,
+                    name=bone.name,
+                    id=bone.bone_id,
+                    parent_index=bone.parent_index,
+                    mirror_index=bone.mirror_index,
+                    flags=int(bone.flags),
+                    local_transform=bone.local_transform.values,
+                    world_transform=bone.absolute_transform.values,
+                    inverse_bind_transform=bone.inverse_bind_transform.values,
+                )
+                for bone in self.bones
+            ),
+            signature=self.signature,
+        )
+
 
 class WdrLightType(IntEnum):
     POINT = 1
@@ -684,6 +984,77 @@ class WdrLight:
     bone_id: int
     reserved_1: int
     reserved_2: int
+
+    def to_model_light(self) -> ModelLight:
+        """Return a normalized light while retaining RAGE-specific identifiers."""
+
+        if self.light_type == WdrLightType.POINT:
+            light_type = ModelLightType.POINT
+        elif self.light_type == WdrLightType.SPOT:
+            light_type = ModelLightType.SPOT
+        else:
+            light_type = ModelLightType.OTHER
+        return ModelLight(
+            light_type=light_type,
+            position=(self.position.x, self.position.y, self.position.z),
+            direction=(self.direction.x, self.direction.y, self.direction.z),
+            tangent=(self.tangent.x, self.tangent.y, self.tangent.z),
+            color=(
+                self.color[0] / 255.0,
+                self.color[1] / 255.0,
+                self.color[2] / 255.0,
+                self.color[3] / 255.0,
+            ),
+            intensity=self.intensity,
+            range=self.attenuation_end,
+            inner_cone_angle=self.hotspot_angle,
+            outer_cone_angle=self.falloff_angle,
+            bone_id=self.bone_id,
+            flags=self.flags,
+            lod_distance=self.lod_distance,
+            fade_distance=self.fade_distance,
+            shadow_fade_distance=self.shadow_fade_distance,
+            volume_intensity=self.volume_intensity,
+            volume_size=self.volume_size,
+            corona_size=self.corona_size,
+            corona_hdr_multiplier=self.corona_hdr_multiplier,
+            corona_hash=self.corona_hash,
+            luminosity_hash=self.luminosity_hash,
+            flashiness=self.flashiness,
+            source_type=int(self.light_type),
+        )
+
+
+_MODEL_TEXTURE_FORMATS: dict[Rsc5TextureFormat | int, ModelTextureFormat] = {
+    Rsc5TextureFormat.DXT1: ModelTextureFormat.BC1,
+    Rsc5TextureFormat.DXT3: ModelTextureFormat.BC2,
+    Rsc5TextureFormat.DXT5: ModelTextureFormat.BC3,
+    Rsc5TextureFormat.A8R8G8B8: ModelTextureFormat.BGRA8,
+    Rsc5TextureFormat.L8: ModelTextureFormat.R8,
+}
+
+
+def _texture_to_model(texture: Rsc5Texture) -> ModelTexture:
+    try:
+        texture_format = _MODEL_TEXTURE_FORMATS[texture.format]
+    except KeyError as error:
+        raise ValueError(
+            f"unsupported neutral texture format: {int(texture.format):#x}"
+        ) from error
+    return ModelTexture(
+        name=texture.name,
+        file_name=texture.file_name,
+        width=texture.width,
+        height=texture.height,
+        format=texture_format,
+        kind=(
+            ModelTextureKind.CUBE if texture.is_cube else ModelTextureKind.TEXTURE_2D
+        ),
+        mip_count=texture.mip_levels,
+        data=texture.data,
+        mip_sizes=texture.mip_sizes,
+        source_format=int(texture.format),
+    )
 
 
 @dataclass(slots=True)
@@ -1440,6 +1811,58 @@ class WdrDocument:
     def find_embedded_texture(self, name: str) -> Rsc5Texture | None:
         dictionary = self.embedded_texture_dictionary
         return None if dictionary is None else dictionary.get(name)
+
+    def to_model(self) -> ModelAsset:
+        """Project this drawable into FourFury's target-independent model contract."""
+
+        drawable = self.drawable
+        has_skeleton = drawable.skeleton is not None
+        lods = tuple(
+            lod.to_model_lod(
+                draw_bucket_mask=drawable.draw_bucket_masks[index],
+                has_skeleton=has_skeleton,
+            )
+            for index, lod in enumerate(drawable.lods)
+            if lod is not None
+        )
+        return ModelAsset(
+            name=Path(self.name).stem,
+            lods=lods,
+            materials=tuple(
+                shader.to_model_material(index=index)
+                for index, shader in enumerate(self.shaders)
+            ),
+            textures=tuple(
+                _texture_to_model(texture) for texture in self.embedded_textures
+            ),
+            skeleton=(
+                None
+                if drawable.skeleton is None
+                else drawable.skeleton.to_model_skeleton()
+            ),
+            lights=tuple(light.to_model_light() for light in drawable.lights),
+            bounding_box=ModelAabb(
+                minimum=(
+                    drawable.bounding_box_minimum.x,
+                    drawable.bounding_box_minimum.y,
+                    drawable.bounding_box_minimum.z,
+                ),
+                maximum=(
+                    drawable.bounding_box_maximum.x,
+                    drawable.bounding_box_maximum.y,
+                    drawable.bounding_box_maximum.z,
+                ),
+            ),
+            bounding_sphere=ModelBoundingSphere(
+                center=(
+                    drawable.bounding_center.x,
+                    drawable.bounding_center.y,
+                    drawable.bounding_center.z,
+                ),
+                radius=drawable.bounding_sphere_radius,
+            ),
+            source_path=self.source_path,
+        )
 
     def to_bytes(self) -> bytes:
         """Return the original lossless RSC5 resource.
