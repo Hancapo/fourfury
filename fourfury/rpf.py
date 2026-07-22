@@ -92,7 +92,7 @@ class RpfArchive:
     name: str = "archive.rpf"
     source_path: str = ""
     encrypted: bool = False
-    unknown: int = 0
+    reserved: int = 0
     version: int = 2
     crypto: GTAIVCrypto | None = field(default=None, repr=False, compare=False)
     root: RpfDirectoryEntry = field(default_factory=lambda: RpfDirectoryEntry(name="", path="", flags=1))
@@ -150,7 +150,7 @@ class RpfArchive:
         if len(header) != 20 or header[:4] not in (RPF2_MAGIC, RPF3_MAGIC):
             raise ValueError("invalid GTA IV RPF archive")
         self.version = 2 if header[:4] == RPF2_MAGIC else 3
-        toc_size, entry_count, self.unknown, encryption = struct.unpack_from("<4I", header, 4)
+        toc_size, entry_count, self.reserved, encryption = struct.unpack_from("<4I", header, 4)
         if toc_size < entry_count * _ENTRY_SIZE:
             raise ValueError("RPF table size is smaller than its entry table")
         self.encrypted = encryption != 0
@@ -360,7 +360,7 @@ class RpfArchive:
                 table.extend(struct.pack("<4I", entry.name_offset, entry.size, encoded_offset, entry.uncompressed_size))
         table.extend(names)
         table.extend(b"\0" * (toc_size - len(table)))
-        output = bytearray(struct.pack("<4s4I", RPF2_MAGIC, toc_size, len(entries), self.unknown, 0))
+        output = bytearray(struct.pack("<4s4I", RPF2_MAGIC, toc_size, len(entries), self.reserved, 0))
         output.extend(b"\0" * (RPF_HEADER_SIZE - len(output)))
         output.extend(table)
         for entry, payload in payloads:

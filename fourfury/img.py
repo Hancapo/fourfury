@@ -53,7 +53,7 @@ class ImgArchive:
     name: str = "archive.img"
     source_path: str = ""
     encrypted: bool = False
-    unknown: int = 0xE9
+    reserved: int = 0xE9
     crypto: GTAIVCrypto | None = field(default=None, repr=False, compare=False)
     entries: list[ImgEntry] = field(default_factory=list)
     _source_bytes: bytes | None = field(default=None, repr=False, compare=False)
@@ -110,7 +110,7 @@ class ImgArchive:
                 self.crypto = GTAIVCrypto()
             prefix = self.crypto.decrypt(prefix)
         magic, version, count, table_size = struct.unpack("<4I", prefix)
-        entry_size, self.unknown = struct.unpack_from("<2H", header, 16)
+        entry_size, self.reserved = struct.unpack_from("<2H", header, 16)
         if magic != IMG3_MAGIC or version != IMG3_VERSION:
             raise ValueError("invalid IMG3 archive")
         if entry_size != IMG3_ENTRY_SIZE:
@@ -240,7 +240,7 @@ class ImgArchive:
             table.extend(struct.pack("<IIIHH", first_dword, entry.resource_type, entry.offset_sectors, entry.used_blocks, entry.padding))
             data_offset += entry.allocated_size
         table.extend(names)
-        output = bytearray(struct.pack("<4I2H", IMG3_MAGIC, IMG3_VERSION, len(self.entries), table_size, IMG3_ENTRY_SIZE, self.unknown))
+        output = bytearray(struct.pack("<4I2H", IMG3_MAGIC, IMG3_VERSION, len(self.entries), table_size, IMG3_ENTRY_SIZE, self.reserved))
         output.extend(table)
         output.extend(b"\0" * (align(len(output)) - len(output)))
         for entry, payload in payloads:
