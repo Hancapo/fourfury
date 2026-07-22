@@ -236,6 +236,30 @@ class WbnPolygon:
             neighbor_words,
         )
 
+    @property
+    def is_triangle(self) -> bool:
+        """Return whether the fourth vertex word is the triangle sentinel."""
+
+        return self.vertex_indices[3] == 0
+
+    @property
+    def is_quad(self) -> bool:
+        """Return whether all four vertex words describe polygon corners."""
+
+        return not self.is_triangle
+
+    @property
+    def face_vertex_indices(self) -> tuple[int, ...]:
+        """Return the three or four vertex indices that form the polygon face."""
+
+        return self.vertex_indices[:3] if self.is_triangle else self.vertex_indices
+
+    @property
+    def face_neighbor_indices(self) -> tuple[int | None, ...]:
+        """Return adjacency entries for the polygon's three or four edges."""
+
+        return self.neighbor_indices[:3] if self.is_triangle else self.neighbor_indices
+
     def to_bytes(self) -> bytes:
         if not 0 <= self.material_index <= 0xFF:
             raise ValueError("WBN polygon material index must fit in one byte")

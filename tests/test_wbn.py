@@ -12,6 +12,7 @@ from fourfury import (
     WbnComposite,
     WbnDocument,
     WbnMaterialFlags,
+    WbnPolygon,
     WbnVertex,
     rsc5_physical_size,
     rsc5_virtual_size,
@@ -77,7 +78,7 @@ def _sample_wbn() -> bytes:
     struct.pack_into("<9h", data, 0x400, 0, 0, 0, 2, 0, 0, 0, 2, 0)
     struct.pack_into("<9h", data, 0x420, 0, 0, 0, 1, 0, 0, 0, 1, 0)
     area_bits = struct.unpack("<I", struct.pack("<f", 1.25))[0] & 0xFFFFFF00
-    struct.pack_into("<3fI4H4H", data, 0x440, 0.0, 0.0, 1.0, area_bits, 0, 1, 2, 2, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF)
+    struct.pack_into("<3fI4H4H", data, 0x440, 0.0, 0.0, 1.0, area_bits, 0, 1, 2, 0, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF)
     material_flags = 3 | int(WbnMaterialFlags.STAIRS | WbnMaterialFlags.SEE_THROUGH)
     struct.pack_into("<BBH", data, 0x460, 7, 0, material_flags)
 
@@ -105,6 +106,20 @@ class Rsc5Tests(unittest.TestCase):
 
 
 class WbnTests(unittest.TestCase):
+    def test_distinguishes_triangle_sentinels_from_quad_vertices(self) -> None:
+        raw = struct.pack(
+            "<3fI4H4H",
+            0.0, 0.0, 1.0, 0,
+            4, 5, 6, 7,
+            10, 11, 12, 13,
+        )
+        polygon = WbnPolygon.from_bytes(raw, 0)
+
+        self.assertFalse(polygon.is_triangle)
+        self.assertTrue(polygon.is_quad)
+        self.assertEqual(polygon.face_vertex_indices, (4, 5, 6, 7))
+        self.assertEqual(polygon.face_neighbor_indices, (10, 11, 12, 13))
+
     def test_reads_wbn_extracted_from_img(self) -> None:
         source = _sample_wbn()
         archive = ImgArchive.empty("map.img")
@@ -139,6 +154,10 @@ class WbnTests(unittest.TestCase):
         self.assertEqual(len(geometry.vertices), 3)
         self.assertEqual(geometry.decoded_vertices[1].x, 11.0)
         self.assertEqual(geometry.polygons[0].vertex_indices[:3], (0, 1, 2))
+        self.assertTrue(geometry.polygons[0].is_triangle)
+        self.assertFalse(geometry.polygons[0].is_quad)
+        self.assertEqual(geometry.polygons[0].face_vertex_indices, (0, 1, 2))
+        self.assertEqual(geometry.polygons[0].face_neighbor_indices, (None, None, None))
         self.assertEqual(geometry.polygons[0].neighbor_indices, (None, None, None, None))
         self.assertAlmostEqual(geometry.polygons[0].area, 1.25, places=4)
         self.assertEqual(geometry.materials[0].material_id, 7)
