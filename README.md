@@ -10,6 +10,7 @@
 - WPL: typed reading and writing for instances, garages, parked cars, culls, StrBig records, LOD culls, zones, and blocks.
 - IDE: lossless reading and writing of sectioned definition files, including comments, blank lines, and nested MLO tokens.
 - GTXD/`txdp`: typed child-to-parent texture dictionary hierarchies, lossless editing, chain resolution, and cycle detection.
+- NOD: typed vehicle and pedestrian navigation graphs with fixed-point positions, directed links, path costs, behavior-flag confidence metadata, and lossless editing.
 - `materials.dat`: typed physical-material catalogs with names, FX groups, friction, elasticity, density, grip, combustion, and behavior flags.
 - WBD: typed RSC5 collision dictionaries with JOAAT lookup, shared bounds, material resolution, and lossless fixed-size editing.
 - WBN: typed RSC5 collision bounds, composites, quantized geometry, resolved physical materials, polygons, and BVH trees, with lossless fixed-size editing.
@@ -81,6 +82,32 @@ wpl.save("example.wpl")
 ```
 
 The WPL writer preserves trailing bytes such as the sector padding found in some stock files. The IDE writer preserves original lines byte-for-byte until their parsed values are modified.
+
+## Navigation paths
+
+The 64 `nodes*.nod` files in `pc/data/cdimages/paths.img` divide the city into pathfinding sectors. Vehicle and pedestrian nodes are exposed separately while retaining their shared directed graph:
+
+```python
+from fourfury import ImgArchive, NodDocument
+
+with ImgArchive.from_path(game / "pc/data/cdimages/paths.img") as archive:
+    entry = archive.find_entry("nodes32.nod")
+    paths = NodDocument.from_bytes(entry.read(), name=entry.name)
+
+for node in paths.vehicle_nodes:
+    print(node.key, node.position, node.path_width, node.link_count)
+    if node.is_intersection:
+        print("intersection", node.flag_info)
+    if node.is_boat:
+        print("boat route")
+    for link in node.outgoing_links:
+        destination = link.resolve(paths)  # None when the link enters another sector.
+        print(link.target_key, link.length, link.pathfinding_cost, destination)
+```
+
+Node positions and path widths use their world-space values in the public API. The original fixed-point encodings remain exactly reproducible. `runtime_address` and `source_path_value` deliberately describe the provenance of the two compiler metadata fields instead of assigning speculative behavior to them. Undocumented behavior bits are preserved collectively in `unresolved_flags`; the four embedded adjacency-count bits are exposed as `link_count` and can be edited with `set_link_count()`.
+
+NOD writing supports new documents and topology-preserving edits. When changing topology, link records must remain contiguous per node and `link_start`/`link_count` must describe the complete link table; invalid graphs are rejected before writing.
 
 ## Collision bounds
 
@@ -241,3 +268,4 @@ print(instance.lod_distance)  # -1.0 uses the model's IDE draw distance
 - WTD structures are currently read-only; decoded texture replacement and dictionary rebuilding are not implemented yet.
 - SCO bytecode is not implemented yet.
 - WBN/WBD sphere, capsule, and box records currently expose their shared bound metadata but not every type-specific trailing field.
+- Some NOD node and link behavior bits have no reliable public definition. They are preserved without speculative names through `unresolved_flags` and `traffic_flags`.
