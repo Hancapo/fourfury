@@ -12,7 +12,11 @@ from fourfury import (
     NodNodeFlags,
     NodNodeKind,
     NodVector3,
+    PathNodeId,
+    PathNodeKind,
+    combine_nod_graphs,
     load_nod,
+    load_nod_graph,
 )
 
 
@@ -182,6 +186,66 @@ class NodTests(unittest.TestCase):
         document.nodes[0].set_link_count(15)
         with self.assertRaisesRegex(ValueError, "adjacency exceeds"):
             document.to_bytes()
+
+    def test_projects_to_target_independent_path_graph(self) -> None:
+        document = NodDocument.from_bytes(_sample_nod(), name="nodes12.nod")
+
+        graph = document.to_path_graph()
+
+        self.assertEqual(graph.name, "nodes12")
+        self.assertEqual(graph.source_format, "nod")
+        self.assertEqual(len(graph.nodes), 3)
+        self.assertEqual(len(graph.edges), 3)
+        road = graph.find_node((12, 100))
+        self.assertIsNotNone(road)
+        self.assertEqual(road.kind, PathNodeKind.VEHICLE)  # type: ignore[union-attr]
+        self.assertEqual(road.position, (10.0, -20.5, 12.5))  # type: ignore[union-attr]
+        self.assertEqual(road.width, 3.0)  # type: ignore[union-attr]
+        self.assertEqual(road.traits, frozenset({"regular_speed", "intersection"}))  # type: ignore[union-attr]
+        self.assertEqual(
+            graph.outgoing_edges((12, 100))[1].target, PathNodeId(11, 500)
+        )
+        self.assertEqual(graph.unresolved_targets, (PathNodeId(11, 500),))
+
+    def test_path_iterators_export_source_metadata_only_when_requested(self) -> None:
+        document = NodDocument.from_bytes(_sample_nod())
+
+        node = next(document.iter_path_nodes())
+        edge = next(document.iter_path_edges())
+        detailed_node = next(document.iter_path_nodes(include_source_metadata=True))
+        detailed_edge = next(document.iter_path_edges(include_source_metadata=True))
+
+        self.assertIsNone(node.source_metadata)
+        self.assertIsNone(edge.source_metadata)
+        self.assertEqual(detailed_node.source_metadata.get("flags"), int(document.nodes[0].flags))  # type: ignore[union-attr]
+        self.assertEqual(detailed_node.source_metadata.get("unresolved_flags"), 0x80000000)  # type: ignore[union-attr]
+        self.assertEqual(detailed_edge.source_metadata.get("traffic_flags"), 0x0102)  # type: ignore[union-attr]
+
+    def test_loads_and_combines_neutral_sector_graphs(self) -> None:
+        first = NodDocument.from_bytes(_sample_nod(), name="nodes12.nod")
+        external = NodNode(
+            0,
+            0,
+            11,
+            500,
+            0,
+            NOD_HEURISTIC_SENTINEL,
+            0,
+            NodVector3(20.0, 20.0, 0.0),
+            8,
+            0,
+            0,
+        )
+        second = NodDocument([external], [], vehicle_node_count=1, name="nodes11.nod")
+
+        direct = load_nod_graph(_sample_nod())
+        combined = combine_nod_graphs((first, second), name="city")
+
+        self.assertEqual(len(direct.nodes), 3)
+        self.assertEqual(combined.name, "city")
+        self.assertEqual(combined.source_format, "nod")
+        self.assertEqual(combined.unresolved_targets, ())
+        self.assertIsNotNone(combined.find_node((11, 500)))
 
 
 if __name__ == "__main__":

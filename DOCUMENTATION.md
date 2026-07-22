@@ -158,6 +158,30 @@ Node positions and path widths use their world-space values in the public API. T
 
 NOD writing supports new documents and topology-preserving edits. When changing topology, link records must remain contiguous per node and `link_start`/`link_count` must describe the complete link table; invalid graphs are rejected before writing.
 
+For converters, visualization, and graph analysis, NOD sectors can be projected into
+immutable data that does not expose the binary NOD layout:
+
+```python
+from fourfury import combine_nod_graphs, load_nod_graph
+
+graph = load_nod_graph("nodes32.nod")
+for node in graph.nodes:
+    print(node.id, node.position, node.kind, node.width, node.traits)
+for edge in graph.edges:
+    print(edge.source, edge.target, edge.length, edge.cost)
+
+# Parsed sectors can be joined without changing their original identifiers.
+city = combine_nod_graphs(sector_documents, name="liberty-city")
+print(city.unresolved_targets)
+city.save_json("liberty-city-paths.json")
+```
+
+`NodDocument.iter_path_nodes()` and `iter_path_edges()` provide the same projection
+without allocating a complete graph snapshot. `include_source_metadata=True` retains
+NOD-only scalar values such as packed flags, compiler metadata, and traffic flags;
+the default output contains only portable navigation data. Cross-sector destinations
+remain valid node identifiers even when their sector has not been loaded.
+
 WNV files in `pc/data/cdimages/navmeshes.img` contain the polygon meshes used for
 local navigation and cover queries:
 

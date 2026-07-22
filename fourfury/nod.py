@@ -4,9 +4,18 @@ import struct
 from dataclasses import dataclass, field
 from enum import IntEnum, IntFlag
 from pathlib import Path
-from typing import BinaryIO, Iterator, Literal
+from typing import BinaryIO, Iterable, Iterator, Literal
 
 from ._utils import atomic_write
+from .path import (
+    PathEdge,
+    PathGraph,
+    PathNode,
+    PathNodeId,
+    PathNodeKind,
+    PathSourceMetadata,
+    combine_path_graphs,
+)
 
 
 NOD_HEADER_SIZE = 16
@@ -364,6 +373,91 @@ class NodDocument:
     def find_node(self, area_id: int, node_id: int) -> NodNode | None:
         return self._index.get((area_id, node_id))
 
+    def iter_path_nodes(
+        self, *, include_source_metadata: bool = False
+    ) -> Iterator[PathNode]:
+        """Yield target-independent node snapshots without copying the graph."""
+
+        for node in self.nodes:
+            metadata = None
+            if include_source_metadata:
+                metadata = PathSourceMetadata(
+                    "nod",
+                    (
+                        ("runtime_address", node.runtime_address),
+                        ("reserved", node.reserved),
+                        ("source_path_value", node.source_path_value),
+                        ("heuristic_cost", node.heuristic_cost),
+                        ("link_start", node.link_start),
+                        ("link_count", node.link_count),
+                        ("path_width_code", node.path_width_code),
+                        ("path_type", node.path_type),
+                        ("flags", int(node.flags)),
+                        ("unresolved_flags", node.unresolved_flags),
+                    ),
+                )
+            yield PathNode(
+                PathNodeId(node.area_id, node.node_id),
+                (node.position.x, node.position.y, node.position.z),
+                (
+                    PathNodeKind.PEDESTRIAN
+                    if node.is_pedestrian
+                    else PathNodeKind.VEHICLE
+                ),
+                width=node.path_width,
+                traits=_path_node_traits(node),
+                source_metadata=metadata,
+            )
+
+    def iter_path_edges(
+        self, *, include_source_metadata: bool = False
+    ) -> Iterator[PathEdge]:
+        """Yield target-independent directed edges, including external targets."""
+
+        for node in self.nodes:
+            source = PathNodeId(node.area_id, node.node_id)
+            end = node.link_start + node.link_count
+            for link_index in range(node.link_start, end):
+                link = self.links[link_index]
+                metadata = None
+                if include_source_metadata:
+                    metadata = PathSourceMetadata(
+                        "nod",
+                        (
+                            ("link_index", link_index),
+                            ("length", link.length),
+                            ("pathfinding_cost", link.pathfinding_cost),
+                            ("traffic_flags", link.traffic_flags),
+                        ),
+                    )
+                yield PathEdge(
+                    source,
+                    PathNodeId(link.target_area_id, link.target_node_id),
+                    length=link.length,
+                    cost=link.pathfinding_cost,
+                    source_metadata=metadata,
+                )
+
+    def to_path_graph(self, *, include_source_metadata: bool = False) -> PathGraph:
+        """Project this NOD sector into an immutable, target-independent graph."""
+
+        self.validate()
+        return PathGraph(
+            name=Path(self.name).stem,
+            nodes=tuple(
+                self.iter_path_nodes(
+                    include_source_metadata=include_source_metadata
+                )
+            ),
+            edges=tuple(
+                self.iter_path_edges(
+                    include_source_metadata=include_source_metadata
+                )
+            ),
+            source_format="nod",
+            source_path=self.source_path,
+        )
+
     def validate(self) -> None:
         if not 0 <= self.vehicle_node_count <= len(self.nodes):
             raise ValueError("NOD vehicle node count exceeds the node count")
@@ -439,6 +533,19 @@ def _require_uint(value: int, bits: int, label: str) -> None:
         raise ValueError(f"{label} must fit in {bits} unsigned bits")
 
 
+def _path_node_traits(node: NodNode) -> frozenset[str]:
+    traits: set[str] = set()
+    if node.flags & NodNodeFlags.REGULAR_SPEED:
+        traits.add("regular_speed")
+    if node.flags & NodNodeFlags.SCRIPTED_DRIVERS_ONLY:
+        traits.add("scripted_drivers_only")
+    if node.is_intersection:
+        traits.add("intersection")
+    if node.is_boat:
+        traits.add("boat")
+    return frozenset(traits)
+
+
 def load_nod(source: str | Path | bytes | BinaryIO) -> NodDocument:
     if isinstance(source, (str, Path)):
         return NodDocument.from_path(source)
@@ -447,10 +554,41 @@ def load_nod(source: str | Path | bytes | BinaryIO) -> NodDocument:
     return NodDocument.from_bytes(source.read())
 
 
+def load_nod_graph(
+    source: str | Path | bytes | BinaryIO,
+    *,
+    include_source_metadata: bool = False,
+) -> PathGraph:
+    """Load a NOD source directly into the neutral path graph model."""
+
+    return load_nod(source).to_path_graph(
+        include_source_metadata=include_source_metadata
+    )
+
+
+def combine_nod_graphs(
+    documents: Iterable[NodDocument],
+    *,
+    name: str = "gtaiv-paths",
+    include_source_metadata: bool = False,
+) -> PathGraph:
+    """Combine NOD sectors and resolve targets present in the supplied set."""
+
+    return combine_path_graphs(
+        (
+            document.to_path_graph(
+                include_source_metadata=include_source_metadata
+            )
+            for document in documents
+        ),
+        name=name,
+    )
+
+
 __all__ = [
     "NOD_HEADER_SIZE", "NOD_HEURISTIC_SENTINEL", "NOD_LINK_COUNT_MASK",
     "NOD_LINK_COUNT_SHIFT", "NOD_LINK_SIZE", "NOD_NODE_SIZE", "NOD_PATH_WIDTH_SCALE",
     "NOD_NODE_FLAG_INFO", "NOD_XY_SCALE", "NOD_Z_SCALE", "NodDocument", "NodFlagConfidence",
     "NodLink", "NodNode", "NodNodeFlagInfo", "NodNodeFlags", "NodNodeKind", "NodVector3",
-    "explain_node_flags", "load_nod",
+    "combine_nod_graphs", "explain_node_flags", "load_nod", "load_nod_graph",
 ]
