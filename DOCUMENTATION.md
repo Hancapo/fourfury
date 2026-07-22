@@ -32,6 +32,7 @@ has no target-game dependency.
 - IDE: lossless reading and writing of sectioned definition files, including comments, blank lines, and nested MLO tokens.
 - GTXD/`txdp`: typed child-to-parent texture dictionary hierarchies, lossless editing, chain resolution, and cycle detection.
 - NOD: typed vehicle and pedestrian navigation graphs with fixed-point positions, directed links, path costs, behavior-flag confidence metadata, and lossless editing.
+- WNV: typed RSC5 navigation meshes with quantized vertices, polygon flags, adjacency edges, cover points, and quadtrees, with lossless fixed-size editing.
 - `materials.dat`: typed physical-material catalogs with names, FX groups, friction, elasticity, density, grip, combustion, and behavior flags.
 - WBD: typed RSC5 collision dictionaries with JOAAT lookup, shared bounds, material resolution, and lossless fixed-size editing.
 - WBN: typed RSC5 collision bounds, composites, quantized geometry, resolved physical materials, polygons, and BVH trees, with lossless fixed-size editing.
@@ -156,6 +157,38 @@ for node in paths.vehicle_nodes:
 Node positions and path widths use their world-space values in the public API. The original fixed-point encodings remain exactly reproducible. `runtime_address` and `source_path_value` deliberately describe the provenance of the two compiler metadata fields instead of assigning speculative behavior to them. Undocumented behavior bits are preserved collectively in `unresolved_flags`; the four embedded adjacency-count bits are exposed as `link_count` and can be edited with `set_link_count()`.
 
 NOD writing supports new documents and topology-preserving edits. When changing topology, link records must remain contiguous per node and `link_start`/`link_count` must describe the complete link table; invalid graphs are rejected before writing.
+
+WNV files in `pc/data/cdimages/navmeshes.img` contain the polygon meshes used for
+local navigation and cover queries:
+
+```python
+from fourfury import ImgArchive, WnvDocument, WnvEdgeFlags, WnvPolygonFlags
+
+with ImgArchive.from_path(game / "pc/data/cdimages/navmeshes.img") as archive:
+    entry = archive.find_entry("sectors2x2_60_94.wnv")
+    if entry is None:
+        raise FileNotFoundError("sectors2x2_60_94.wnv")
+    navmesh = WnvDocument.from_bytes(entry.read(), name=entry.name)
+
+for polygon in navmesh.polygons:
+    print(polygon.area_id, polygon.flags, navmesh.polygon_vertex_indices(polygon))
+    if polygon.flags & WnvPolygonFlags.PAVEMENT:
+        print("pavement", navmesh.polygon_vertices(polygon))
+
+for edge in navmesh.edges:
+    if edge.flags & WnvEdgeFlags.EXTERNAL_EDGE:
+        print("external adjacency", edge.area_id_1, edge.polygon_id_1)
+
+for node in navmesh.iter_quadtree():
+    if node.data is not None:
+        print(node.data.polygon_ids, node.data.cover_points)
+```
+
+Vertices are available both in their original unsigned 16-bit representation and
+as world-space values through `decoded_vertices`. Named flags cover behavior supported
+by source evidence; other bits remain preserved by the `IntFlag` values and are exposed
+separately through `edge.unresolved_flags` and `polygon.unresolved_flags`. The writer
+supports edits that keep array counts and quadtree topology fixed.
 
 ## Collision bounds
 
@@ -354,3 +387,4 @@ print(instance.lod_distance)  # -1.0 uses the model's IDE draw distance
 - SCO bytecode is not implemented yet.
 - WBN/WBD sphere, capsule, and box records currently expose their shared bound metadata but not every type-specific trailing field.
 - Some NOD node and link behavior bits have no reliable public definition. They are preserved without speculative names through `unresolved_flags` and `traffic_flags`.
+- WNV writing preserves fixed-size edits but does not rebuild vertex, polygon, edge, or quadtree topology.
