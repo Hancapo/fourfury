@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=77", "wheel>=0.42"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fourfury"
+version = "0.1.0"
+description = "Python library for Grand Theft Auto IV archive formats."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "fourfury contributors" }]
+
+[tool.setuptools.packages.find]
+include = ["fourfury*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
