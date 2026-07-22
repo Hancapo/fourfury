@@ -9,8 +9,11 @@
 - IMG3: reading, searching, extraction, creation, and writing.
 - WPL: typed reading and writing for instances, garages, parked cars, culls, StrBig records, LOD culls, zones, and blocks.
 - IDE: lossless reading and writing of sectioned definition files, including comments, blank lines, and nested MLO tokens.
+- GTXD/`txdp`: typed child-to-parent texture dictionary hierarchies, lossless editing, chain resolution, and cycle detection.
 - `materials.dat`: typed physical-material catalogs with names, FX groups, friction, elasticity, density, grip, combustion, and behavior flags.
 - WBN: typed RSC5 collision bounds, composites, quantized geometry, resolved physical materials, polygons, and BVH trees, with lossless fixed-size editing.
+- WDR: typed RSC5 drawables with LODs, models, decoded vertex declarations, vertex and index buffers, shaders, embedded textures, skeletons, and lights.
+- WTD: typed RSC5 texture dictionaries with names, dimensions, formats, mip chains, raw payloads, and DDS export.
 - Encrypted stock archives: automatic GTA IV 16-pass AES-256 ECB decryption using the embedded, SHA-1-verified game key.
 - RSC5 resources inside RPF and IMG archives: resource headers and flags are preserved, and trailing sector padding after the zlib stream is removed when extracting from IMG archives.
 
@@ -110,6 +113,55 @@ bounds.save("edited.wbn")
 
 The writer preserves the original compressed resource byte-for-byte when nothing changes. It supports edits that keep array counts fixed; adding or removing bounds, vertices, polygons, materials, or BVH nodes requires pointer relocation and is rejected explicitly.
 
+## Drawable models
+
+WDR resources expose renderable model geometry rather than collision surfaces. Vertex attributes are decoded according to each file's RAGE declaration, including positions, normals, colors, UV sets, skin data, and tangents:
+
+```python
+from fourfury import ImgArchive, WdrDocument
+
+with ImgArchive.from_path(game / "pc/data/maps/east/bronx_e.img") as archive:
+    entry = archive.find_entry("bay_billbrds_02.wdr")
+    drawable = WdrDocument.from_bytes(entry.read(), name=entry.name)
+
+high_lod = drawable.lods[0]
+for model in high_lod.models:
+    for geometry in model.geometries:
+        print(geometry.vertex_count, geometry.face_count, geometry.shader.name)
+        print(geometry.vertices[0].position)
+        print(geometry.vertices[0].normal)
+        print(geometry.vertices[0].texcoords)
+        print(geometry.triangles[0])
+
+        for parameter in geometry.shader.parameters:
+            if parameter.texture is not None:
+                print(parameter.name, parameter.texture.name)
+
+for texture in drawable.embedded_textures:
+    print(texture.name, texture.width, texture.height, texture.format_name)
+    texture.save_dds(Path("textures") / f"{texture.name}.dds")
+```
+
+The current WDR API is a read-only semantic view. `to_bytes()` and `save()` preserve the original compressed RSC5 resource exactly; editing decoded drawable structures is not serialized yet.
+
+## Texture dictionaries and GTXD parents
+
+Standalone WTD files and drawable-embedded dictionaries use the same texture model. DDS export wraps the original compressed mip data without recompressing it:
+
+```python
+from fourfury import GtxdHierarchy, ImgArchive, WtdDocument
+
+hierarchy = GtxdHierarchy.from_game(game)
+print(hierarchy.chain("bxe_ind1"))  # ("bxe_ind1", "bronxe_shared")
+
+with ImgArchive.from_path(game / "pc/data/maps/east/bronx_e.img") as archive:
+    entry = archive.find_entry("bronxe_shared.wtd")
+    dictionary = WtdDocument.from_bytes(entry.read(), name=entry.name)
+    dictionary.get("qw_rooftex1").save_dds("qw_rooftex1.dds")
+```
+
+`GtxdDocument` provides a typed, lossless view of `txdp` sections in `gtxd.ide` or regular map IDE files. `GtxdHierarchy.from_game(...)` combines the base-game common and map IDE relationships in the same child-first lookup order used by GTA IV.
+
 ### WPL instance flags
 
 Instance records expose semantic fields instead of anonymous integers:
@@ -150,5 +202,6 @@ print(instance.lod_distance)  # -1.0 uses the model's IDE draw distance
 - RPF3 writing is not implemented yet; audio RPF3 archives are currently read-only.
 - RPF3 names are not stored as text in the archive. The API preserves `name_hash` and uses its hexadecimal representation when no external name dictionary is available.
 - IMG3 archives are flat and cannot contain internal directories.
-- Asset formats such as `WDR`, `WTD`, and `SCO` are not implemented yet.
+- WTD structures are currently read-only; decoded texture replacement and dictionary rebuilding are not implemented yet.
+- SCO bytecode is not implemented yet.
 - WBN sphere, capsule, and box records currently expose their shared bound metadata but not every type-specific trailing field.
