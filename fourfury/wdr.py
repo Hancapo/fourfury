@@ -41,6 +41,11 @@ from .wtd import (
     read_rsc5_texture_dictionary,
 )
 
+try:
+    from ._native import decode_wdr_vertices as _native_decode_wdr_vertices
+except ImportError:
+    _native_decode_wdr_vertices = None
+
 
 WDR_RESOURCE_VERSION = 0x6E
 WDR_DRAWABLE_SIZE = 0x90
@@ -404,8 +409,26 @@ class WdrVertexBuffer:
     lock_thread_id: int
     vertex_data: bytes
     d3d_vertex_buffer: int
-    vertices: tuple[WdrVertex, ...]
+    attribute_channels: dict[WdrVertexSemantic, tuple[VertexValue, ...]]
     _pointer: int = field(repr=False, compare=False)
+    _vertices: tuple[WdrVertex, ...] | None = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+    )
+
+    @property
+    def vertices(self) -> tuple[WdrVertex, ...]:
+        """Materialize row-oriented vertices only when compatibility callers need them."""
+
+        if self._vertices is None:
+            channels = tuple(self.attribute_channels.items())
+            self._vertices = tuple(
+                WdrVertex({semantic: values[index] for semantic, values in channels})
+                for index in range(self.vertex_count)
+            )
+        return self._vertices
 
     @property
     def data(self) -> bytes:
@@ -516,18 +539,17 @@ class WdrShaderGroup:
 
 
 def _attribute_channel(
-    vertices: tuple[WdrVertex, ...],
+    vertex_buffer: WdrVertexBuffer | None,
     semantic: WdrVertexSemantic,
 ) -> tuple[VertexValue, ...]:
-    values = tuple(vertex.get(semantic) for vertex in vertices)
-    present = tuple(value for value in values if value is not None)
-    if not present:
+    if vertex_buffer is None:
         return ()
-    if len(present) != len(vertices):
+    values = vertex_buffer.attribute_channels.get(semantic, ())
+    if values and len(values) != vertex_buffer.vertex_count:
         raise ValueError(
             f"WDR vertex semantic {semantic.name} is present only on some vertices"
         )
-    return present
+    return values
 
 
 def _components(value: VertexValue) -> tuple[float | int, ...]:
@@ -661,32 +683,32 @@ class WdrGeometry:
 
         if self.primitive_type != WdrPrimitiveType.TRIANGLE_LIST:
             raise ValueError(f"unsupported WDR primitive type: {self.primitive_type}")
-        vertices = self.vertices
-        if self.vertex_count and len(vertices) != self.vertex_count:
+        vertex_buffer = self.vertex_buffer
+        if self.vertex_count and vertex_buffer is None:
             raise ValueError("WDR geometry has no complete decoded vertex stream")
 
         positions = tuple(
             _vector3(value, "WDR position")
-            for value in _attribute_channel(vertices, WdrVertexSemantic.POSITION)
+            for value in _attribute_channel(vertex_buffer, WdrVertexSemantic.POSITION)
         )
-        if vertices and len(positions) != len(vertices):
+        if self.vertex_count and len(positions) != self.vertex_count:
             raise ValueError("WDR geometry has vertices without positions")
         normals = tuple(
             _vector3(value, "WDR normal")
-            for value in _attribute_channel(vertices, WdrVertexSemantic.NORMAL)
+            for value in _attribute_channel(vertex_buffer, WdrVertexSemantic.NORMAL)
         )
         tangents = tuple(
             _vector4(value, "WDR tangent", default_w=1.0)
-            for value in _attribute_channel(vertices, WdrVertexSemantic.TANGENT)
+            for value in _attribute_channel(vertex_buffer, WdrVertexSemantic.TANGENT)
         )
         binormals = tuple(
             _vector3(value, "WDR binormal")
-            for value in _attribute_channel(vertices, WdrVertexSemantic.BINORMAL)
+            for value in _attribute_channel(vertex_buffer, WdrVertexSemantic.BINORMAL)
         )
         texcoord_channels: list[ModelTexCoordChannel] = []
         for index in range(8):
             semantic = WdrVertexSemantic(WdrVertexSemantic.TEXCOORD_0 + index)
-            values = _attribute_channel(vertices, semantic)
+            values = _attribute_channel(vertex_buffer, semantic)
             if values:
                 texcoord_channels.append(
                     ModelTexCoordChannel(
@@ -700,7 +722,7 @@ class WdrGeometry:
         for index, semantic in enumerate(
             (WdrVertexSemantic.COLOR_0, WdrVertexSemantic.COLOR_1)
         ):
-            values = _attribute_channel(vertices, semantic)
+            values = _attribute_channel(vertex_buffer, semantic)
             if values:
                 color_channels.append(
                     ModelColorChannel(
@@ -710,11 +732,11 @@ class WdrGeometry:
                 )
         blend_weights = tuple(
             _weights4(value)
-            for value in _attribute_channel(vertices, WdrVertexSemantic.BLEND_WEIGHTS)
+            for value in _attribute_channel(vertex_buffer, WdrVertexSemantic.BLEND_WEIGHTS)
         )
         blend_indices = tuple(
             _indices4(value)
-            for value in _attribute_channel(vertices, WdrVertexSemantic.BLEND_INDICES)
+            for value in _attribute_channel(vertex_buffer, WdrVertexSemantic.BLEND_INDICES)
         )
         sphere = (
             None
@@ -1207,7 +1229,12 @@ class _WdrReader:
         result.append(-1.0 if w_bits == 3 else float(w_bits))
         return tuple(result)  # type: ignore[return-value]
 
-    def decode_vertex(self, data: bytes, base: int, layout: WdrVertexLayout) -> WdrVertex:
+    def decode_vertex_attributes(
+        self,
+        data: bytes,
+        base: int,
+        layout: WdrVertexLayout,
+    ) -> dict[WdrVertexSemantic, VertexValue]:
         attributes: dict[WdrVertexSemantic, VertexValue] = {}
         for element in layout.elements:
             offset = base + element.offset
@@ -1231,7 +1258,42 @@ class _WdrReader:
             else:  # pragma: no cover - parse_layout rejects these first
                 raise ValueError(f"unsupported WDR vertex element type: {element_type}")
             attributes[element.semantic] = value
+        return attributes
+
+    def decode_vertex(self, data: bytes, base: int, layout: WdrVertexLayout) -> WdrVertex:
+        attributes = self.decode_vertex_attributes(data, base, layout)
         return WdrVertex(attributes)
+
+    def decode_vertex_channels(
+        self,
+        data: bytes,
+        vertex_count: int,
+        stride: int,
+        layout: WdrVertexLayout,
+    ) -> dict[WdrVertexSemantic, tuple[VertexValue, ...]]:
+        if _native_decode_wdr_vertices is not None:
+            decoded = _native_decode_wdr_vertices(
+                data,
+                vertex_count,
+                stride,
+                tuple(
+                    (int(element.semantic), int(element.element_type), element.offset)
+                    for element in layout.elements
+                ),
+            )
+            return {
+                WdrVertexSemantic(int(semantic)): tuple(values)
+                for semantic, values in decoded.items()
+            }
+
+        channels: dict[WdrVertexSemantic, list[VertexValue]] = {
+            element.semantic: [] for element in layout.elements
+        }
+        for index in range(vertex_count):
+            attributes = self.decode_vertex_attributes(data, index * stride, layout)
+            for semantic, value in attributes.items():
+                channels[semantic].append(value)
+        return {semantic: tuple(values) for semantic, values in channels.items()}
 
     def parse_vertex_buffer(self, pointer: int) -> WdrVertexBuffer:
         if pointer in self.vertex_buffers:
@@ -1263,22 +1325,23 @@ class _WdrReader:
                 else self.read(vertex_data_pointer, data_size, "WDR vertex data")
             )
         primary = locked_data or vertex_data
-        vertices = tuple(
-            self.decode_vertex(primary, index * stride, layout)
-            for index in range(vertex_count)
-        ) if primary else ()
+        attribute_channels = (
+            self.decode_vertex_channels(primary, vertex_count, stride, layout)
+            if primary
+            else {}
+        )
         buffer = WdrVertexBuffer(
-            vertex_count,
-            locked,
-            flags,
-            stride,
-            layout,
-            locked_data,
-            lock_thread_id,
-            vertex_data,
-            d3d_vertex_buffer,
-            vertices,
-            pointer,
+            vertex_count=vertex_count,
+            locked=locked,
+            flags=flags,
+            stride=stride,
+            layout=layout,
+            locked_data=locked_data,
+            lock_thread_id=lock_thread_id,
+            vertex_data=vertex_data,
+            d3d_vertex_buffer=d3d_vertex_buffer,
+            attribute_channels=attribute_channels,
+            _pointer=pointer,
         )
         self.vertex_buffers[pointer] = buffer
         return buffer
