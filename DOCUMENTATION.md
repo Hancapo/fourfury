@@ -37,6 +37,7 @@ has no target-game dependency.
 - `materials.dat`: typed physical-material catalogs with names, FX groups, friction, elasticity, density, grip, combustion, and behavior flags.
 - WBD: typed RSC5 collision dictionaries with JOAAT lookup, shared bounds, material resolution, and lossless fixed-size editing.
 - WBN: typed RSC5 collision bounds, composites, quantized geometry, resolved physical materials, polygons, and BVH trees, with lossless fixed-size editing.
+- WDD: typed hash-addressed RSC5 drawable dictionaries with JOAAT lookup and neutral model projection.
 - WDR: typed RSC5 drawables with LODs, models, decoded vertex declarations, vertex and index buffers, shaders, embedded textures, skeletons, and lights.
 - WFT: typed RSC5 fragment models with reusable WDR drawables, physical groups and children, named flags, damping, inertia, archetypes, and embedded WBN collision bounds.
 - WTD: typed RSC5 texture dictionaries with names, dimensions, formats, mip chains, raw payloads, and DDS export.
@@ -347,6 +348,32 @@ as `reserved` fields instead of being assigned speculative meanings.
 
 The current WDR API is a read-only semantic view. `to_bytes()` and `save()` preserve the original compressed RSC5 resource exactly; editing decoded drawable structures is not serialized yet.
 
+WDD files store several of the same drawables behind JOAAT hashes. Entries can be
+looked up with a model name, raw bytes, or the serialized hash:
+
+```python
+from fourfury import WddDocument
+
+dictionary = WddDocument.from_path(game / "pc/models/plantsmgr.wdd")
+print(dictionary.parent_dictionary_hash, dictionary.usage_count)
+
+for entry in dictionary:
+    print(entry.hash_hex, len(entry.drawable.geometries), len(entry.shaders))
+    for texture in entry.embedded_textures:
+        print(texture.name)
+
+plant = dictionary.find_drawable("some_plant_model")
+if plant is not None:
+    print(plant.bounding_box_minimum, plant.bounding_box_maximum)
+
+# Integer hashes use their hexadecimal form as the neutral model name.
+model = dictionary.to_model(dictionary.entries[0].name_hash)
+```
+
+`to_models()` projects every entry using its hexadecimal hash as the fallback name.
+The WDD API is read-only and preserves the complete original RSC5 resource through
+`to_bytes()` and `save()`.
+
 ## Fragment models
 
 WFT resources combine drawable data with a breakable physics hierarchy. The drawable
@@ -453,6 +480,7 @@ print(instance.lod_distance)  # -1.0 uses the model's IDE draw distance
 - RPF3 names are not stored as text in the archive. The API preserves `name_hash` and uses its hexadecimal representation when no external name dictionary is available.
 - IMG3 archives are flat and cannot contain internal directories.
 - WTD structures are currently read-only; decoded texture replacement and dictionary rebuilding are not implemented yet.
+- WDD structures are currently read-only; dictionary and drawable edits are not serialized yet.
 - WFT structures are currently read-only; drawable, hierarchy, and physics edits are not serialized yet.
 - SCO bytecode is not implemented yet.
 - WBN/WBD sphere, capsule, and box records currently expose their shared bound metadata but not every type-specific trailing field.

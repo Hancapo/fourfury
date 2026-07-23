@@ -24,6 +24,7 @@ and related metadata.
 | materials.dat | Yes | No | Typed physical-material catalog |
 | WBN | Yes | Limited | Collision bounds and fixed-size edits |
 | WBD | Yes | Limited | Collision dictionaries and fixed-size edits |
+| WDD | Yes | No | Hash-addressed drawable dictionaries and neutral model projection |
 | WDR | Yes | No | Drawables plus neutral model projection |
 | WFT | Yes | No | Fragment drawables, physics hierarchy, and collision bounds |
 | WTD | Yes | No | Texture dictionaries and DDS export |
