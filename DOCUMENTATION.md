@@ -125,6 +125,10 @@ wpl = WplDocument.from_path(game / "pc/data/maps/manhat/manhat01.wpl")
 for instance in wpl.instances:
     print(hex(instance.model_hash), instance.flags, instance.lod_index, instance.lod_distance)
 
+hierarchy = wpl.build_lod_hierarchy(strict=True)
+for root in hierarchy.roots:
+    print("root", root.index, "descendants", len(tuple(root.iter_descendants())))
+
 # Both formats can be edited and written back.
 ide.add_entry("objs", ["example", "example", "100", "0"])
 ide.save("example.ide")
@@ -132,6 +136,36 @@ wpl.save("example.wpl")
 ```
 
 The WPL writer preserves trailing bytes such as the sector padding found in some stock files. The IDE writer preserves original lines byte-for-byte until their parsed values are modified.
+
+### WPL LOD parenting
+
+`lod_index` has two different scopes in GTA IV. A standalone parent WPL resolves
+the index against its own instance table. A streamed WPL stored inside an IMG
+resolves it against the parent WPL named after that archive: for example,
+`manhat01_6.wpl` inside `manhat01.img` references instances in `manhat01.wpl`.
+Pass that document explicitly so the scope cannot be mistaken:
+
+```python
+from fourfury import WplDocument, WplLodParentScope
+
+parent = WplDocument.from_path("manhat01.wpl")
+stream = WplDocument.from_bytes(stream_entry.read(), name=stream_entry.name)
+hierarchy = stream.build_lod_hierarchy(parent=parent, strict=True)
+
+node = hierarchy.node_at(0)  # index 0 in the streamed document
+if node.parent is not None:
+    assert node.parent_scope is WplLodParentScope.EXTERNAL
+    print(node.parent.document.name, node.parent.index)
+    print("depth", node.depth, "children", len(node.children))
+```
+
+The hierarchy is a detached snapshot over mutable WPL records. It
+exposes `nodes`, validated `edges`, resolved `roots`, `parent`, `children`,
+`depth`, `ancestors`, and `iter_descendants()`. Build it again after changing an
+instance list or `lod_index`. With `strict=False` (the default), malformed links
+are retained as structured `issues` and affected nodes report
+`has_unresolved_parent`; `strict=True` raises `WplLodHierarchyError`. Neither
+mode changes the raw indices or the bytes written by `WplDocument`.
 
 ## Navigation paths
 
@@ -453,7 +487,7 @@ instance.detail_level = 2
 for info in instance.flag_info:
     print(info.flag.name, info.effect, info.confidence)
 
-print(instance.lod_index)     # -1 means no parent LOD instance
+print(instance.lod_index)     # -1 means no parent; resolve non-negative values through a hierarchy
 print(instance.block_index)   # BLOK association; it may reference inherited map data
 print(instance.lod_distance)  # -1.0 uses the model's IDE draw distance
 ```

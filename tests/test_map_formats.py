@@ -12,6 +12,9 @@ from fourfury import (
     WplInstance,
     WplInstanceFlags,
     WplLodCull,
+    WplLodHierarchyError,
+    WplLodIssueCode,
+    WplLodParentScope,
     WplParkedCar,
     WplStrBig,
     WplZone,
@@ -59,6 +62,15 @@ class IdeTests(unittest.TestCase):
 
 
 class WplTests(unittest.TestCase):
+    @staticmethod
+    def make_instance(*, lod_index: int = -1, model_hash: int = 1) -> WplInstance:
+        return WplInstance(
+            0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 1.0,
+            model_hash,
+            lod_index=lod_index,
+        )
+
     def test_all_supported_section_types_round_trip(self) -> None:
         document = WplDocument.empty()
         document.add(WplGarage(*([1.0] * 8), 1, 2, "GARAGE1"))
@@ -132,6 +144,81 @@ class WplTests(unittest.TestCase):
         instance.flags |= WplInstanceFlags(0x10000)
         self.assertEqual(instance.flag_info[-1].flag, WplInstanceFlags(0x10000))
         self.assertEqual(instance.flag_info[-1].confidence, "unresolved")
+
+    def test_local_lod_hierarchy_models_roots_depth_and_traversal(self) -> None:
+        document = WplDocument.empty("local")
+        root = document.add(self.make_instance(model_hash=10))
+        child = document.add(self.make_instance(lod_index=0, model_hash=11))
+        grandchild = document.add(self.make_instance(lod_index=1, model_hash=12))
+        second_root = document.add(self.make_instance(model_hash=13))
+
+        hierarchy = document.build_lod_hierarchy(strict=True)
+        root_node = hierarchy.node_for(root)
+        child_node = hierarchy.node_for(child)
+        grandchild_node = hierarchy.node_for(grandchild)
+
+        self.assertEqual(hierarchy.roots, (root_node, hierarchy.node_for(second_root)))
+        self.assertEqual(root_node.children, (child_node,))
+        self.assertEqual(tuple(root_node.iter_descendants()), (child_node, grandchild_node))
+        self.assertEqual(grandchild_node.ancestors, (child_node, root_node))
+        self.assertEqual((root_node.depth, child_node.depth, grandchild_node.depth), (0, 1, 2))
+        self.assertEqual(child_node.parent_scope, WplLodParentScope.LOCAL)
+        self.assertEqual(child_node.parent_index, 0)
+        self.assertFalse(child_node.has_unresolved_parent)
+
+    def test_stream_lod_indices_resolve_against_external_parent_document(self) -> None:
+        parent = WplDocument.empty("manhat01")
+        parent_root = parent.add(self.make_instance(model_hash=20))
+        parent_child = parent.add(self.make_instance(lod_index=0, model_hash=21))
+        stream = WplDocument.empty("manhat01_6")
+        stream_child = stream.add(self.make_instance(lod_index=1, model_hash=22))
+        stream_root = stream.add(self.make_instance(model_hash=23))
+
+        hierarchy = stream.build_lod_hierarchy(parent=parent, strict=True)
+        parent_root_node = hierarchy.node_for(parent_root)
+        parent_child_node = hierarchy.node_for(parent_child)
+        stream_child_node = hierarchy.node_for(stream_child)
+
+        self.assertIs(stream_child_node.parent, parent_child_node)
+        self.assertEqual(stream_child_node.parent_scope, WplLodParentScope.EXTERNAL)
+        self.assertEqual(stream_child_node.depth, 2)
+        self.assertEqual(parent_child_node.parent_scope, WplLodParentScope.LOCAL)
+        self.assertEqual(parent_root_node.children, (parent_child_node,))
+        self.assertEqual(parent_child_node.children, (stream_child_node,))
+        self.assertIn(hierarchy.node_for(stream_root), hierarchy.roots)
+        self.assertEqual(hierarchy.roots_for(stream), (hierarchy.node_for(stream_root),))
+        self.assertEqual(hierarchy.nodes_for(stream), (stream_child_node, hierarchy.node_for(stream_root)))
+
+    def test_lod_hierarchy_reports_invalid_indices_without_changing_binary_data(self) -> None:
+        document = WplDocument.empty("broken")
+        instance = document.add(self.make_instance(lod_index=7))
+        packed = document.to_bytes()
+
+        hierarchy = document.build_lod_hierarchy()
+
+        self.assertEqual(document.to_bytes(), packed)
+        self.assertTrue(hierarchy.node_for(instance).has_unresolved_parent)
+        self.assertEqual(hierarchy.issues[0].code, WplLodIssueCode.PARENT_INDEX_OUT_OF_RANGE)
+        self.assertIs(hierarchy.issues[0].target_document, document)
+        with self.assertRaises(WplLodHierarchyError) as caught:
+            document.build_lod_hierarchy(strict=True)
+        self.assertEqual(caught.exception.issues, hierarchy.issues)
+
+    def test_lod_hierarchy_detects_cycles_and_rebuilds_after_edits(self) -> None:
+        document = WplDocument.empty("cycle")
+        first = document.add(self.make_instance(lod_index=1))
+        second = document.add(self.make_instance(lod_index=0))
+
+        malformed = document.build_lod_hierarchy()
+
+        self.assertEqual(malformed.issues[0].code, WplLodIssueCode.CYCLE)
+        self.assertTrue(malformed.node_for(first).has_unresolved_parent)
+        self.assertTrue(malformed.node_for(second).has_unresolved_parent)
+
+        first.lod_index = -1
+        repaired = document.build_lod_hierarchy(strict=True)
+        self.assertIs(repaired.node_for(second).parent, repaired.node_for(first))
+        self.assertEqual(repaired.roots, (repaired.node_for(first),))
 
     def test_rejects_truncated_section(self) -> None:
         header = struct.pack("<17I", 3, 1, *([0] * 15))

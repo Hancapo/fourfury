@@ -4,9 +4,12 @@ import struct
 from dataclasses import dataclass, field
 from enum import IntFlag
 from pathlib import Path
-from typing import BinaryIO, ClassVar, Iterator, Literal, cast
+from typing import TYPE_CHECKING, BinaryIO, ClassVar, Iterator, Literal, cast
 
 from ._utils import atomic_write
+
+if TYPE_CHECKING:
+    from .wpl_lod import WplLodHierarchy
 
 WPL_VERSION = 3
 WPL_HEADER_SIZE = 68
@@ -182,6 +185,12 @@ class WplInstance:
         """Describe all active flag bits and the confidence of each name."""
 
         return explain_instance_flags(self.flags)
+
+    @property
+    def has_lod_parent(self) -> bool:
+        """Return whether the record contains a parent LOD reference."""
+
+        return self.lod_index >= 0
 
     def to_bytes(self) -> bytes:
         return struct.pack(
@@ -493,6 +502,27 @@ class WplDocument:
     def add(self, record: WplRecord) -> WplRecord:
         self.records(record.SECTION).append(record)
         return record
+
+    def build_lod_hierarchy(
+        self,
+        *,
+        parent: "WplDocument | None" = None,
+        strict: bool = False,
+    ) -> "WplLodHierarchy":
+        """Resolve instance LOD references into an explicit hierarchy snapshot.
+
+        Parentless WPL files resolve ``lod_index`` against their own instance
+        table. Streamed WPL files resolve it against the parent WPL associated
+        with their IMG archive, which callers pass through ``parent``.
+
+        The returned graph does not mutate or cache links on instances, so it
+        cannot become silently stale after editing ``lod_index`` or either
+        document's instance list. Build a new snapshot after such edits.
+        """
+
+        from .wpl_lod import WplLodHierarchy
+
+        return WplLodHierarchy.from_document(self, parent=parent, strict=strict)
 
     def __iter__(self) -> Iterator[WplRecord]:
         for section in range(16):
