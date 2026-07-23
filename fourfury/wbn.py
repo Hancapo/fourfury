@@ -510,7 +510,7 @@ class WbnBvhGeometry(WbnGeometry):
 
 @dataclass(slots=True)
 class WbnComposite(WbnBound):
-    children: list[WbnBound]
+    children: list[WbnBound | None]
     current_matrices: list[WbnMatrix] | None
     last_matrices: list[WbnMatrix] | None
     child_bounding_boxes: list[WbnAabb] | None
@@ -520,6 +520,7 @@ class WbnComposite(WbnBound):
     _last_matrices_offset: int | None = field(repr=False, compare=False)
     _child_bounding_boxes_offset: int | None = field(repr=False, compare=False)
     _child_count: int = field(repr=False, compare=False)
+    _child_presence: tuple[bool, ...] = field(repr=False, compare=False)
 
     def _write(self, data: bytearray, visited: set[int]) -> None:
         if self._offset in visited:
@@ -527,6 +528,8 @@ class WbnComposite(WbnBound):
         WbnBound._write(self, data, visited)
         if len(self.children) != self._child_count:
             raise ValueError("WBN editing cannot change the composite child count")
+        if tuple(child is not None for child in self.children) != self._child_presence:
+            raise ValueError("WBN editing cannot change null composite child slots")
         arrays = (
             (self.current_matrices, self._current_matrices_offset, 64, "current matrix"),
             (self.last_matrices, self._last_matrices_offset, 64, "last matrix"),
@@ -541,7 +544,8 @@ class WbnComposite(WbnBound):
                 start = offset + index * size
                 data[start : start + size] = value.to_bytes()
         for child in self.children:
-            child._write(data, visited)
+            if child is not None:
+                child._write(data, visited)
 
 
 def _iter_bounds(roots: Iterable[WbnBound]) -> Iterator[WbnBound]:
@@ -555,7 +559,7 @@ def _iter_bounds(roots: Iterable[WbnBound]) -> Iterator[WbnBound]:
         seen.add(bound._offset)
         yield bound
         if isinstance(bound, WbnComposite):
-            pending.extend(reversed(bound.children))
+            pending.extend(child for child in reversed(bound.children) if child is not None)
 
 
 def _iter_geometries(bounds: Iterable[WbnBound]) -> Iterator[WbnGeometry]:
@@ -739,7 +743,11 @@ class _WbnParser:
             children_offset = self._pointer(bounds_pointer, capacity * 4, "composite child pointer array")
             child_pointers = struct.unpack_from(f"<{capacity}I", self.data, children_offset) if capacity else ()
             children = [
-                self.parse_bound(self._pointer(child_pointers[index], WBN_BOUND_SIZE, "composite child"))
+                None
+                if child_pointers[index] == 0
+                else self.parse_bound(
+                    self._pointer(child_pointers[index], WBN_BOUND_SIZE, "composite child")
+                )
                 for index in range(count)
             ]
             current_offset = self._optional_pointer(current_pointer, count * 64, "current matrix array")
@@ -757,6 +765,7 @@ class _WbnParser:
                 _last_matrices_offset=last_offset,
                 _child_bounding_boxes_offset=aabbs_offset,
                 _child_count=count,
+                _child_presence=tuple(pointer != 0 for pointer in child_pointers[:count]),
             )
         else:
             bound = WbnBound(**common)

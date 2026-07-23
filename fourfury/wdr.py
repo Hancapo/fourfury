@@ -1090,7 +1090,7 @@ class WdrDrawable:
     shader_group: WdrShaderGroup | None
     skeleton: WdrSkeleton | None
     lights: tuple[WdrLight, ...]
-    reserved: tuple[int, int, int, int, int]
+    reserved: tuple[int, ...]
 
     @property
     def models(self) -> tuple[WdrDrawableModel, ...]:
@@ -1771,9 +1771,15 @@ class _WdrReader:
             reserved_2,
         )
 
-    def parse_drawable(self) -> WdrDrawable:
-        pointer = RSC5_VIRTUAL_BASE
-        raw = self.read(pointer, WDR_DRAWABLE_SIZE, "WDR drawable")
+    def parse_drawable(
+        self,
+        pointer: int = RSC5_VIRTUAL_BASE,
+        *,
+        has_lights: bool = True,
+    ) -> WdrDrawable:
+        size = WDR_DRAWABLE_SIZE if has_lights else 116
+        label = "WDR drawable" if has_lights else "fragment drawable base"
+        raw = self.read(pointer, size, label)
         shader_group_pointer, skeleton_pointer = struct.unpack_from("<2I", raw, 8)
         bounding_center = WdrVector4(*struct.unpack_from("<4f", raw, 16))
         bounding_box_minimum = WdrVector4(*struct.unpack_from("<4f", raw, 32))
@@ -1800,14 +1806,21 @@ class _WdrReader:
                 for geometry in lod.geometries:
                     if geometry.shader_index < len(shader_group.shaders):
                         geometry.shader = shader_group.shaders[geometry.shader_index]
-        lights_pointer, light_count, light_capacity = struct.unpack_from("<IHH", raw, 128)
-        if light_capacity < light_count:
-            raise ValueError("WDR light count exceeds its capacity")
-        lights = tuple(
-            self.parse_light(lights_pointer + index * WDR_LIGHT_SIZE)
-            for index in range(light_count)
-        ) if light_count else ()
-        reserved = (*struct.unpack_from("<3I", raw, 116), *struct.unpack_from("<2I", raw, 136))
+        if has_lights:
+            lights_pointer, light_count, light_capacity = struct.unpack_from("<IHH", raw, 128)
+            if light_capacity < light_count:
+                raise ValueError("WDR light count exceeds its capacity")
+            lights = tuple(
+                self.parse_light(lights_pointer + index * WDR_LIGHT_SIZE)
+                for index in range(light_count)
+            ) if light_count else ()
+            reserved = (
+                *struct.unpack_from("<3I", raw, 116),
+                *struct.unpack_from("<2I", raw, 136),
+            )
+        else:
+            lights = ()
+            reserved = ()
         return WdrDrawable(
             bounding_center,
             bounding_box_minimum,
