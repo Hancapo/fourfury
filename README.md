@@ -17,7 +17,7 @@ and related metadata.
 | RPF3 | Yes | No | Audio archives; hash-only names remain hexadecimal |
 | IMG3 | Yes | Yes | Search, extraction, creation, and resource padding handling |
 | IDE | Yes | Yes | Lossless sectioned text, including comments and MLO tokens |
-| WPL | Yes | Yes | Placements, culls, garages, zones, and instance flags |
+| WPL | Yes | Yes | Placements, explicit LOD hierarchies, culls, garages, zones, and instance flags |
 | GTXD | Yes | Yes | Texture-parent chains and cycle detection |
 | NOD | Yes | Yes | Navigation nodes, links, costs, and topology validation |
 | WNV | Yes | Limited | Navigation meshes, edges, cover points, and quadtrees |

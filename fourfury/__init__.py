@@ -254,6 +254,15 @@ from .wpl import (
     explain_instance_flags,
     load_wpl,
 )
+from .wpl_lod import (
+    WplLodEdge,
+    WplLodHierarchy,
+    WplLodHierarchyError,
+    WplLodIssue,
+    WplLodIssueCode,
+    WplLodNode,
+    WplLodParentScope,
+)
 
 __version__ = "0.1.0"
 
@@ -310,7 +319,9 @@ __all__ = [
     "WnvVector4", "WnvVertex",
     "WPL_INSTANCE_FLAG_INFO", "WPL_SECTION_SIZES", "WPL_VERSION", "WplBlock", "WplCull",
     "WplDocument", "WplGarage", "WplInstance", "WplInstanceFlagInfo", "WplInstanceFlags",
-    "WplLodCull", "WplParkedCar", "WplStrBig", "WplTimeCycleModifier", "WplZone",
+    "WplLodCull", "WplLodEdge", "WplLodHierarchy", "WplLodHierarchyError", "WplLodIssue",
+    "WplLodIssueCode", "WplLodNode", "WplLodParentScope", "WplParkedCar", "WplStrBig",
+    "WplTimeCycleModifier", "WplZone",
     "combine_nod_graphs", "combine_path_graphs", "create_gtxd", "create_ide", "create_img", "create_rpf", "create_wpl", "joaat",
     "explain_instance_flags", "explain_node_flags",
     "extract_aes_key", "load_ide", "load_img", "load_materials", "load_nod", "load_nod_graph", "load_rpf", "load_wbn",
