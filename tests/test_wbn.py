@@ -106,6 +106,21 @@ class Rsc5Tests(unittest.TestCase):
 
 
 class WbnTests(unittest.TestCase):
+    def test_preserves_null_composite_child_slots(self) -> None:
+        source = _sample_wbn()
+        payload = bytearray(zlib.decompress(source[12:]))
+        struct.pack_into("<I", payload, 0x1A0, 0)
+        source = source[:12] + zlib.compress(payload)
+
+        document = WbnDocument.from_bytes(source)
+
+        self.assertIsInstance(document.root, WbnComposite)
+        self.assertEqual(document.root.children, [None])
+        self.assertEqual(document.to_bytes(), source)
+        document.root.children[0] = document.root
+        with self.assertRaisesRegex(ValueError, "null composite child slots"):
+            document.to_bytes()
+
     def test_distinguishes_triangle_sentinels_from_quad_vertices(self) -> None:
         raw = struct.pack(
             "<3fI4H4H",

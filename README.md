@@ -25,6 +25,7 @@ and related metadata.
 | WBN | Yes | Limited | Collision bounds and fixed-size edits |
 | WBD | Yes | Limited | Collision dictionaries and fixed-size edits |
 | WDR | Yes | No | Drawables plus neutral model projection |
+| WFT | Yes | No | Fragment drawables, physics hierarchy, and collision bounds |
 | WTD | Yes | No | Texture dictionaries and DDS export |
 
 See [DOCUMENTATION.md](DOCUMENTATION.md) for examples, field behavior, writer

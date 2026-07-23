@@ -19,6 +19,7 @@ has no target-game dependency.
 - [Navigation paths](#navigation-paths)
 - [Collision bounds](#collision-bounds)
 - [Drawable models](#drawable-models)
+- [Fragment models](#fragment-models)
 - [Texture dictionaries and GTXD parents](#texture-dictionaries-and-gtxd-parents)
 - [WPL instance flags](#wpl-instance-flags)
 - [Current limitations](#current-limitations)
@@ -37,6 +38,7 @@ has no target-game dependency.
 - WBD: typed RSC5 collision dictionaries with JOAAT lookup, shared bounds, material resolution, and lossless fixed-size editing.
 - WBN: typed RSC5 collision bounds, composites, quantized geometry, resolved physical materials, polygons, and BVH trees, with lossless fixed-size editing.
 - WDR: typed RSC5 drawables with LODs, models, decoded vertex declarations, vertex and index buffers, shaders, embedded textures, skeletons, and lights.
+- WFT: typed RSC5 fragment models with reusable WDR drawables, physical groups and children, named flags, damping, inertia, archetypes, and embedded WBN collision bounds.
 - WTD: typed RSC5 texture dictionaries with names, dimensions, formats, mip chains, raw payloads, and DDS export.
 - Encrypted stock archives: automatic GTA IV 16-pass AES-256 ECB decryption using the embedded, SHA-1-verified game key.
 - RSC5 resources inside RPF and IMG archives: resource headers and flags are preserved, and trailing sector padding after the zlib stream is removed when extracting from IMG archives.
@@ -345,6 +347,49 @@ as `reserved` fields instead of being assigned speculative meanings.
 
 The current WDR API is a read-only semantic view. `to_bytes()` and `save()` preserve the original compressed RSC5 resource exactly; editing decoded drawable structures is not serialized yet.
 
+## Fragment models
+
+WFT resources combine drawable data with a breakable physics hierarchy. The drawable
+parser is shared with WDR, and collision bounds use the same objects as WBN:
+
+```python
+from fourfury import ImgArchive, WftDocument, WftFragmentFlags
+
+with ImgArchive.from_path(game / "pc/models/cdimages/vehicles.img") as archive:
+    entry = archive.find_entry("admiral.wft")
+    if entry is None:
+        raise FileNotFoundError("admiral.wft")
+    fragment = WftDocument.from_bytes(entry.read(), name=entry.name)
+
+print(fragment.fragment.tune_name, fragment.fragment.bounding_sphere)
+print(fragment.fragment.archetype.mass)
+
+for group in fragment.groups:
+    print(group.name, group.mass, group.damage_health, group.flags)
+    for child in group.children:
+        print(child.bone_index, child.undamaged_mass, child.damaged_mass)
+        print(child.bone_attachment, child.link_attachment)
+
+if fragment.fragment.flags & WftFragmentFlags.HAS_ARTICULATED_PARTS:
+    print("articulated fragment")
+
+for drawable in fragment.iter_drawables():
+    print(drawable.name, len(drawable.geometries), drawable.bound)
+
+# The common drawable uses the same target-independent contract as WDR.
+model = fragment.to_model()
+```
+
+`WftFragmentFlags`, `WftGroupFlags`, and `WftChildFlags` expose the known RAGE
+meanings instead of anonymous bytes. `WftDampingKind` addresses all six damping
+vectors by their linear/angular and constant/velocity behavior. Child event
+references are named by collision, break, and break-from-root role while their
+opaque event payloads remain pointer values.
+
+The WFT semantic view is read-only. `to_bytes()` and `save()` preserve the complete
+original RSC5 resource, including fields that are not part of the public semantic
+model.
+
 ## Texture dictionaries and GTXD parents
 
 Standalone WTD files and drawable-embedded dictionaries use the same texture model. DDS export wraps the original compressed mip data without recompressing it:
@@ -408,6 +453,7 @@ print(instance.lod_distance)  # -1.0 uses the model's IDE draw distance
 - RPF3 names are not stored as text in the archive. The API preserves `name_hash` and uses its hexadecimal representation when no external name dictionary is available.
 - IMG3 archives are flat and cannot contain internal directories.
 - WTD structures are currently read-only; decoded texture replacement and dictionary rebuilding are not implemented yet.
+- WFT structures are currently read-only; drawable, hierarchy, and physics edits are not serialized yet.
 - SCO bytecode is not implemented yet.
 - WBN/WBD sphere, capsule, and box records currently expose their shared bound metadata but not every type-specific trailing field.
 - Some NOD node and link behavior bits have no reliable public definition. They are preserved without speculative names through `unresolved_flags` and `traffic_flags`.
