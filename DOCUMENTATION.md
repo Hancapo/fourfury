@@ -34,9 +34,8 @@ has no target-game dependency.
 - GTXD/`txdp`: typed child-to-parent texture dictionary hierarchies, lossless editing, chain resolution, and cycle detection.
 - NOD: typed vehicle and pedestrian navigation graphs with fixed-point positions, directed links, path costs, behavior-flag confidence metadata, and lossless editing.
 - WNV: typed RSC5 navigation meshes with quantized vertices, polygon flags, adjacency edges, cover points, and quadtrees, with lossless fixed-size editing.
-- `materials.dat`: typed physical-material catalogs with names, FX groups, friction, elasticity, density, grip, combustion, and behavior flags.
-- WBD: typed RSC5 collision dictionaries with JOAAT lookup, shared bounds, material resolution, and lossless fixed-size editing.
-- WBN: typed RSC5 collision bounds, composites, quantized geometry, resolved physical materials, polygons, and BVH trees, with lossless fixed-size editing.
+- WBD: typed RSC5 collision dictionaries with JOAAT lookup, shared bounds, built-in material names, and lossless fixed-size editing.
+- WBN: typed RSC5 collision bounds, composites, quantized geometry, built-in physical-material names, polygons, and BVH trees, with lossless fixed-size editing.
 - WDD: typed hash-addressed RSC5 drawable dictionaries with JOAAT lookup and neutral model projection.
 - WDR: typed RSC5 drawables with LODs, models, decoded vertex declarations, vertex and index buffers, shaders, embedded textures, skeletons, and lights.
 - WFT: typed RSC5 fragment models with reusable WDR drawables, physical groups and children, named flags, damping, inertia, archetypes, and embedded WBN collision bounds.
@@ -256,33 +255,38 @@ supports edits that keep array counts and quadtree topology fixed.
 WBN files can be loaded directly after extraction from an IMG entry. Composite children, transforms, bounding boxes, decoded vertices, polygon adjacency, material behavior flags, and BVH nodes are exposed with semantic names:
 
 ```python
-from fourfury import ImgArchive, MaterialCatalog, WbnDocument, WbnMaterialFlags
-
-materials = MaterialCatalog.from_game(game)
+from fourfury import ImgArchive, WbnDocument, WbnMaterialFlags, WbnMaterialType
 
 with ImgArchive.from_path(game / "pc/data/maps/east/bronx_e.img") as archive:
     entry = archive.find_entry("bronx_e_1.wbn")
     if entry is None:
         raise FileNotFoundError("bronx_e_1.wbn")
-    bounds = WbnDocument.from_bytes(entry.read(), name=entry.name, materials=materials)
+    bounds = WbnDocument.from_bytes(entry.read(), name=entry.name)
 
 for geometry in bounds.geometries:
     print(len(geometry.vertices), len(geometry.polygons))
     print(geometry.decoded_vertices[0])
     for material in geometry.materials:
-        print(material.material_id, material.name, material.definition.friction)
+        print(material.material_id, material.material_type, material.name)
         if material.flags & WbnMaterialFlags.SEE_THROUGH:
             print("see-through collision material", material.material_id)
 
     for polygon in geometry.polygons:
         physical_material = geometry.material_for_polygon(polygon)
-        print(physical_material.name, physical_material.definition.fx_group)
+        print(physical_material.name)
 
 # Existing values can be edited without rebuilding resource pointers.
 if bounds.geometries and bounds.geometries[0].materials:
-    bounds.geometries[0].materials[0].flags |= WbnMaterialFlags.BLOCK_CLIMB
+    material = bounds.geometries[0].materials[0]
+    material.material_type = WbnMaterialType.ROCK
+    material.flags |= WbnMaterialFlags.BLOCK_CLIMB
 bounds.save("edited.wbn")
 ```
+
+`WbnMaterialType` embeds the 156 stock material names and their binary IDs, so
+collision loading does not require `materials.dat`. `material_type` is `None` only
+for an out-of-range or modded ID; the original numeric `material_id` is still
+preserved and writable.
 
 The writer preserves the original compressed resource byte-for-byte when nothing changes. It supports edits that keep array counts fixed; adding or removing bounds, vertices, polygons, materials, or BVH nodes requires pointer relocation and is rejected explicitly.
 
@@ -295,7 +299,7 @@ with ImgArchive.from_path(game / "pc/data/maps/east/bronx_e.img") as archive:
     entry = archive.find_entry("bronx_e.wbd")
     if entry is None:
         raise FileNotFoundError("bronx_e.wbd")
-    dictionary = WbdDocument.from_bytes(entry.read(), name=entry.name, materials=materials)
+    dictionary = WbdDocument.from_bytes(entry.read(), name=entry.name)
 
 for collision in dictionary:
     print(collision.hash_hex, collision.bound.bound_type)

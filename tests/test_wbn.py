@@ -6,12 +6,12 @@ import zlib
 
 from fourfury import (
     ImgArchive,
-    MaterialCatalog,
     Rsc5Resource,
     WbnBvhGeometry,
     WbnComposite,
     WbnDocument,
     WbnMaterialFlags,
+    WbnMaterialType,
     WbnPolygon,
     WbnVertex,
     rsc5_physical_size,
@@ -181,22 +181,31 @@ class WbnTests(unittest.TestCase):
         self.assertTrue(geometry.bvh.nodes[0].is_leaf)  # type: ignore[union-attr]
         self.assertEqual(document.to_bytes(), source)
 
-    def test_resolves_wbn_material_ids_through_materials_dat(self) -> None:
-        rows = [
-            f"MAT_{index} GROUP DEFAULT 1.0 0.1 500.0 1.0 0.0 0 0.0 0.0 1.0 0.5 0 0 0 MAT_{index}"
-            for index in range(8)
-        ]
-        catalog = MaterialCatalog.from_text("2.00\n" + "\n".join(rows))
-        document = WbnDocument.from_bytes(_sample_wbn(), materials=catalog)
+    def test_resolves_builtin_material_names_and_edits_enum(self) -> None:
+        document = WbnDocument.from_bytes(_sample_wbn())
         material = document.geometries[0].materials[0]
 
         self.assertEqual(material.material_id, 7)
-        self.assertEqual(material.name, "MAT_7")
-        self.assertEqual(material.definition.density, 500.0)  # type: ignore[union-attr]
+        self.assertIs(material.material_type, WbnMaterialType.RUMBLE_STRIP)
+        self.assertEqual(material.name, "RUMBLE_STRIP")
         self.assertIs(document.geometries[0].material_for_polygon(0), material)
 
-        material.material_id = 3
-        self.assertEqual(material.name, "MAT_3")
+        material.material_type = WbnMaterialType.ROCK
+        self.assertEqual(material.material_id, 11)
+        self.assertEqual(material.name, "ROCK")
+
+        reparsed = WbnDocument.from_bytes(document.to_bytes())
+        self.assertIs(reparsed.geometries[0].materials[0].material_type, WbnMaterialType.ROCK)
+
+    def test_preserves_unknown_material_ids(self) -> None:
+        document = WbnDocument.from_bytes(_sample_wbn())
+        material = document.geometries[0].materials[0]
+
+        material.material_id = 250
+        self.assertIsNone(material.material_type)
+        self.assertIsNone(material.name)
+        reparsed = WbnDocument.from_bytes(document.to_bytes())
+        self.assertEqual(reparsed.geometries[0].materials[0].material_id, 250)
 
     def test_fixed_size_edits_recompress_and_reparse(self) -> None:
         source = _sample_wbn()

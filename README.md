@@ -21,7 +21,6 @@ and related metadata.
 | GTXD | Yes | Yes | Texture-parent chains and cycle detection |
 | NOD | Yes | Yes | Navigation nodes, links, costs, and topology validation |
 | WNV | Yes | Limited | Navigation meshes, edges, cover points, and quadtrees |
-| materials.dat | Yes | No | Typed physical-material catalog |
 | WBN | Yes | Limited | Collision bounds and fixed-size edits |
 | WBD | Yes | Limited | Collision dictionaries and fixed-size edits |
 | WDD | Yes | No | Hash-addressed drawable dictionaries and neutral model projection |
