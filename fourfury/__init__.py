@@ -130,6 +130,7 @@ from .wbn import (
     WbnVertex,
     load_wbn,
 )
+from .wdd import WDD_DICTIONARY_SIZE, WDD_RESOURCE_VERSION, WddDocument, WddEntry, load_wdd
 from .wdr import (
     WDR_DRAWABLE_SIZE,
     WDR_GEOMETRY_SIZE,
@@ -286,6 +287,7 @@ __all__ = [
     "WbnBvhGeometry", "WbnBvhNode", "WbnBvhSubTree", "WbnBvhTree", "WbnComposite",
     "WbnDocument", "WbnGeometry", "WbnMaterial", "WbnMaterialFlags", "WbnMatrix",
     "WbnPolygon", "WbnVector3", "WbnVector4", "WbnVertex",
+    "WDD_DICTIONARY_SIZE", "WDD_RESOURCE_VERSION", "WddDocument", "WddEntry",
     "WDR_DRAWABLE_SIZE", "WDR_GEOMETRY_SIZE", "WDR_INDEX_BUFFER_SIZE", "WDR_LIGHT_SIZE",
     "WDR_LOD_SIZE", "WDR_MODEL_SIZE", "WDR_RESOURCE_VERSION", "WDR_SHADER_PARAMETER_NAMES",
     "WDR_SHADER_SIZE", "WDR_VERTEX_BUFFER_SIZE", "WDR_VERTEX_LAYOUT_SIZE", "WdrBone",
@@ -312,6 +314,6 @@ __all__ = [
     "combine_nod_graphs", "combine_path_graphs", "create_gtxd", "create_ide", "create_img", "create_rpf", "create_wpl", "joaat",
     "explain_instance_flags", "explain_node_flags",
     "extract_aes_key", "load_ide", "load_img", "load_materials", "load_nod", "load_nod_graph", "load_rpf", "load_wbn",
-    "load_gtxd", "load_wbd", "load_wdr", "load_wft", "load_wnv", "load_wpl", "load_wtd", "read_rsc5_texture_dictionary",
+    "load_gtxd", "load_wbd", "load_wdd", "load_wdr", "load_wft", "load_wnv", "load_wpl", "load_wtd", "read_rsc5_texture_dictionary",
     "rsc5_physical_size", "rsc5_pointer_offset", "rsc5_virtual_size",
 ]
