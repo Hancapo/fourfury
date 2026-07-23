@@ -68,3 +68,5 @@ with RpfArchive.from_path(game / "pc/data/game.rpf") as archive:
 
 The [complete documentation](DOCUMENTATION.md) covers every supported format,
 resource APIs, neutral WDR models, editing constraints, and known limitations.
+
+Release notes live in [CHANGELOG.md](CHANGELOG.md).
