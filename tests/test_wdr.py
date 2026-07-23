@@ -11,9 +11,16 @@ from fourfury.wdr import (
     WdrDocument,
     WdrLightType,
     WdrLodLevel,
+    WdrShaderParameter,
     WdrVertex,
+    WdrVector4,
     WdrVertexSemantic,
     load_wdr,
+)
+from fourfury.shaders import (
+    WdrShaderParameterName,
+    WdrShaderPreset,
+    WdrShaderProgram,
 )
 
 
@@ -379,6 +386,20 @@ class WdrTests(unittest.TestCase):
 
         self.assertEqual(geometry.shader.name, "gta_default")  # type: ignore[union-attr]
         self.assertEqual(document.shaders[0].parameters[0].name, "texture_sampler")
+        self.assertIs(
+            document.shaders[0].parameters[0].known_name,
+            WdrShaderParameterName.TEXTURE_SAMPLER,
+        )
+        self.assertIs(document.shaders[0].program, WdrShaderProgram.GTA_DEFAULT)
+        self.assertIs(document.shaders[0].preset, WdrShaderPreset.GTA_DEFAULT)
+        self.assertIs(
+            document.shaders[0].get_parameter("texture_sampler"),
+            document.shaders[0].parameters[0],
+        )
+        self.assertEqual(
+            document.find_shaders(WdrShaderProgram.GTA_DEFAULT), document.shaders
+        )
+        self.assertEqual(document.unknown_shaders, ())
         self.assertEqual(document.shaders[0].parameters[0].texture.name, "sample")  # type: ignore[union-attr]
         self.assertEqual(document.shaders[0].parameters[1].name, "specular_factor")
         self.assertEqual(document.shaders[0].parameters[1].value.x, 35.0)  # type: ignore[union-attr]
@@ -396,6 +417,31 @@ class WdrTests(unittest.TestCase):
     def test_loads_from_binary_stream(self) -> None:
         document = load_wdr(io.BytesIO(_sample_wdr()))
         self.assertEqual(document.geometries[0].face_count, 1)
+
+    def test_resolves_sps_aliases_without_hiding_unknown_values(self) -> None:
+        document = WdrDocument.from_bytes(_sample_wdr())
+        shader = document.shaders[0]
+        shader.file_name = "gta_alpha.sps"
+
+        self.assertIs(shader.preset, WdrShaderPreset.GTA_ALPHA)
+        self.assertIs(shader.program, WdrShaderProgram.GTA_DEFAULT)
+        self.assertEqual(shader.definition.draw_bucket, 1)  # type: ignore[union-attr]
+        self.assertEqual(document.find_shaders(WdrShaderPreset.GTA_ALPHA), (shader,))
+
+        unknown = WdrShaderParameter(
+            0xDEADBEEF,
+            1,
+            value=WdrVector4(1.0, 2.0, 3.0, 4.0),
+        )
+        shader.parameters += (unknown,)
+        shader.name = "custom_shader"
+        shader.file_name = "custom_shader.sps"
+
+        self.assertIsNone(shader.program)
+        self.assertIsNone(shader.preset)
+        self.assertEqual(shader.unknown_parameters, (unknown,))
+        self.assertEqual(unknown.name, "hash_deadbeef")
+        self.assertEqual(document.unknown_shaders, (shader,))
 
     def test_rejects_other_rsc5_resource_versions(self) -> None:
         source = bytearray(_sample_wdr())

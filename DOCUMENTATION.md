@@ -348,6 +348,12 @@ for texture in drawable.embedded_textures:
     print(texture.name, texture.width, texture.height, texture.format_name)
     texture.save_dds(Path("textures") / f"{texture.name}.dds")
 
+for shader in drawable.shaders:
+    print(shader.program, shader.preset, shader.file_name)
+    print(shader.definition.defaults if shader.definition is not None else ())
+    texture_sampler = shader.get_parameter("texture_sampler")
+    print(texture_sampler.texture if texture_sampler is not None else None)
+
 if drawable.drawable.skeleton is not None:
     skeleton = drawable.drawable.skeleton
     for bone in skeleton.bones:
@@ -377,6 +383,15 @@ blend weights are normalized to `0.0..1.0`; coordinates and row-major matrices a
 not transformed. The model layer has no FiveFury, GTA V, or YDR dependency, so a
 separate converter can map it to any target format without coupling FourFury to that
 format.
+
+`WdrShaderProgram` enumerates the 71 compiled programs shipped by Complete Edition,
+while `WdrShaderPreset` enumerates all 134 SPS material presets. This distinction is
+intentional: presets such as `gta_alpha.sps` select `gta_default` and override scalar
+defaults. `WdrShader.definition` exposes that relationship; values in
+`definition.defaults` come from the SPS database and remain separate from the
+parameters actually serialized in `shader.parameters`. Unknown programs, presets,
+and parameter hashes remain readable and are reported through `unknown_shaders`,
+`unknown_parameters`, and the existing `hash_XXXXXXXX` names.
 
 The semantic view exposes all four geometry vertex/index-buffer slots, matrix palettes,
 rigid and skinned model bindings, model and per-geometry bounds, complete bone records,

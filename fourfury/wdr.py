@@ -34,6 +34,14 @@ from .rsc import (
     RSC5_VIRTUAL_BASE,
     Rsc5Resource,
 )
+from .shaders import (
+    WdrShaderDefinition,
+    WdrShaderParameterName,
+    WdrShaderPreset,
+    WdrShaderProgram,
+    find_wdr_shader_definition,
+    find_wdr_shader_program,
+)
 from .wtd import (
     Rsc5Texture,
     Rsc5TextureDictionary,
@@ -467,6 +475,11 @@ class WdrShaderParameter:
         return WDR_SHADER_PARAMETER_NAMES.get(self.name_hash, f"hash_{self.name_hash:08x}")
 
     @property
+    def known_name(self) -> WdrShaderParameterName | None:
+        name = WDR_SHADER_PARAMETER_NAMES.get(self.name_hash)
+        return None if name is None else WdrShaderParameterName(name)
+
+    @property
     def is_texture(self) -> bool:
         return self.parameter_type == 0
 
@@ -508,6 +521,67 @@ class WdrShader:
     parameters: tuple[WdrShaderParameter, ...]
     reserved: tuple[int, ...]
     _pointer: int = field(repr=False, compare=False)
+
+    @property
+    def program(self) -> WdrShaderProgram | None:
+        """Return the typed compiled program when it is in the stock catalog."""
+
+        program = find_wdr_shader_program(self.name)
+        if program is not None:
+            return program
+        definition = self.definition
+        return None if definition is None else definition.program
+
+    @property
+    def preset(self) -> WdrShaderPreset | None:
+        """Return the typed SPS material preset selected by this material."""
+
+        definition = self.definition
+        return None if definition is None else definition.preset
+
+    @property
+    def definition(self) -> WdrShaderDefinition | None:
+        """Resolve the stock SPS definition, preferring the stored file name."""
+
+        return find_wdr_shader_definition(
+            self.file_name
+        ) or find_wdr_shader_definition(self.name)
+
+    @property
+    def is_known(self) -> bool:
+        return self.program is not None or self.definition is not None
+
+    @property
+    def unknown_parameters(self) -> tuple[WdrShaderParameter, ...]:
+        return tuple(
+            parameter
+            for parameter in self.parameters
+            if parameter.known_name is None
+        )
+
+    def get_parameter(
+        self, value: str | int | WdrShaderParameterName
+    ) -> WdrShaderParameter | None:
+        """Find a material parameter by hash, semantic name, or typed name."""
+
+        if isinstance(value, int):
+            return next(
+                (
+                    parameter
+                    for parameter in self.parameters
+                    if parameter.name_hash == value
+                ),
+                None,
+            )
+        key = str(value).casefold()
+        return next(
+            (
+                parameter
+                for parameter in self.parameters
+                if parameter.name.casefold() == key
+            ),
+            None,
+        )
 
     def to_model_material(self, *, index: int | None = None) -> ModelMaterial:
         """Return a target-format-independent material description."""
@@ -1873,6 +1947,36 @@ class WdrDocument:
     def shaders(self) -> tuple[WdrShader, ...]:
         group = self.drawable.shader_group
         return () if group is None else group.shaders
+
+    @property
+    def unknown_shaders(self) -> tuple[WdrShader, ...]:
+        return tuple(shader for shader in self.shaders if not shader.is_known)
+
+    def find_shaders(
+        self,
+        value: str | int | WdrShaderPreset | WdrShaderProgram,
+    ) -> tuple[WdrShader, ...]:
+        """Find material instances by hash, program, preset, or stored name."""
+
+        if isinstance(value, int):
+            return tuple(
+                shader for shader in self.shaders if shader.name_hash == value
+            )
+        if isinstance(value, WdrShaderPreset):
+            return tuple(shader for shader in self.shaders if shader.preset is value)
+        if isinstance(value, WdrShaderProgram):
+            return tuple(shader for shader in self.shaders if shader.program is value)
+        key = str(value).casefold()
+        return tuple(
+            shader
+            for shader in self.shaders
+            if key
+            in {
+                shader.name.casefold(),
+                shader.file_name.casefold(),
+                Path(shader.file_name).stem.casefold(),
+            }
+        )
 
     @property
     def embedded_texture_dictionary(self) -> Rsc5TextureDictionary | None:
