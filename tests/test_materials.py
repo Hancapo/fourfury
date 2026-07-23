@@ -2,35 +2,22 @@ from __future__ import annotations
 
 import unittest
 
-from fourfury import MaterialCatalog, MaterialFlags
+from fourfury import WbnMaterialType
 
 
-SAMPLE_MATERIALS = """\
-2.00
+class WbnMaterialTypeTests(unittest.TestCase):
+    def test_exposes_stock_material_names_with_binary_ids(self) -> None:
+        self.assertEqual(len(WbnMaterialType), 156)
+        self.assertEqual(WbnMaterialType.DEFAULT, 0)
+        self.assertEqual(WbnMaterialType.ROCK, 11)
+        self.assertEqual(WbnMaterialType.WATER, 98)
+        self.assertEqual(WbnMaterialType.POOLTABLE_POCKET, 155)
 
-# name fx heli and physical properties
-DEFAULT GENERIC DEFAULT 1.0 0.1 500.0 1.00 -0.15 0 0.0 0.0 5.0 0.5 0 0 0 DEFAULT
-GLASS_WEAK GLASS DEFAULT 0.4 0.1 2500.0 0.90 -0.12 0 0.0 0.0 0.0 0.0 1 0 0 GLASS_WEAK
-WATER WATER DEFAULT 0.5 0.1 1700.0 0.90 -0.10 2 0.0 0.0 0.0 0.0 0 0 1 WATER
-"""
+    def test_resolves_ids_and_names_without_external_data(self) -> None:
+        material = WbnMaterialType(76)
 
-
-class MaterialCatalogTests(unittest.TestCase):
-    def test_parses_real_columns_and_assigns_file_order_ids(self) -> None:
-        catalog = MaterialCatalog.from_text(SAMPLE_MATERIALS)
-
-        self.assertEqual(catalog.version, 2.0)
-        self.assertEqual(len(catalog), 3)
-        self.assertEqual(catalog[0].name, "DEFAULT")
-        self.assertEqual(catalog["glass_weak"].material_id, 1)
-        self.assertEqual(catalog[1].density, 2500.0)
-        self.assertEqual(catalog[1].tyre_grip, 0.9)
-        self.assertTrue(catalog[1].flags & MaterialFlags.SEE_THROUGH)
-        self.assertTrue(catalog[2].naturally_wet)
-
-    def test_rejects_records_with_missing_columns(self) -> None:
-        with self.assertRaisesRegex(ValueError, "expected 17 fields"):
-            MaterialCatalog.from_text("2.00\nBROKEN GENERIC\n")
+        self.assertIs(material, WbnMaterialType.GLASS_WEAK)
+        self.assertEqual(material.name, "GLASS_WEAK")
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import BinaryIO, Iterable, Iterator
 
 from ._utils import atomic_write
-from .materials import MaterialCatalog, MaterialDefinition
+from .materials import WbnMaterialType
 from .rsc import Rsc5Resource, rsc5_pointer_offset
 
 try:
@@ -160,7 +160,6 @@ class WbnMaterial:
     material_id: int
     room_id: int
     flags: WbnMaterialFlags = WbnMaterialFlags.NONE
-    _catalog: MaterialCatalog | None = field(default=None, repr=False, compare=False)
     _padding: int = field(default=0, repr=False, compare=False)
     _raw: bytes | None = field(default=None, repr=False, compare=False)
 
@@ -174,18 +173,25 @@ class WbnMaterial:
             WbnMaterialFlags(packed & 0xFFE0),
             _padding=padding,
             _raw=raw,
-        )
+    )
 
     @property
-    def definition(self) -> MaterialDefinition | None:
-        """Return the matching entry from materials.dat when a catalog is bound."""
+    def material_type(self) -> WbnMaterialType | None:
+        """Return the built-in physical material enum for this ID, when known."""
 
-        return None if self._catalog is None else self._catalog.get(self.material_id)
+        try:
+            return WbnMaterialType(self.material_id)
+        except ValueError:
+            return None
+
+    @material_type.setter
+    def material_type(self, value: WbnMaterialType) -> None:
+        self.material_id = int(value)
 
     @property
     def name(self) -> str | None:
-        definition = self.definition
-        return None if definition is None else definition.name
+        material_type = self.material_type
+        return None if material_type is None else material_type.name
 
     def to_bytes(self) -> bytes:
         if not 0 <= self.material_id <= 0xFF:
@@ -780,18 +786,15 @@ class WbnDocument:
     resource: Rsc5Resource
     name: str = "bounds.wbn"
     source_path: str = ""
-    material_catalog: MaterialCatalog | None = field(default=None, repr=False, compare=False)
     _root_pointer: int = field(default=0, repr=False, compare=False)
 
     @classmethod
     def from_path(
         cls,
         path: str | Path,
-        *,
-        materials: MaterialCatalog | None = None,
     ) -> "WbnDocument":
         source = Path(path)
-        document = cls.from_bytes(source.read_bytes(), name=source.name, materials=materials)
+        document = cls.from_bytes(source.read_bytes(), name=source.name)
         document.source_path = str(source)
         return document
 
@@ -801,7 +804,6 @@ class WbnDocument:
         data: bytes,
         *,
         name: str = "bounds.wbn",
-        materials: MaterialCatalog | None = None,
     ) -> "WbnDocument":
         resource = Rsc5Resource.from_bytes(data)
         if resource.version != WBN_RESOURCE_VERSION:
@@ -814,19 +816,7 @@ class WbnDocument:
         root_offset = rsc5_pointer_offset(root_pointer)
         parser = _WbnParser(resource.virtual_data)
         root = parser.parse_bound(root_offset)
-        document = cls(root, resource, name, _root_pointer=root_pointer)
-        if materials is not None:
-            document.bind_materials(materials)
-        return document
-
-    def bind_materials(self, catalog: MaterialCatalog) -> "WbnDocument":
-        """Resolve every WBN material ID through a materials.dat catalog."""
-
-        self.material_catalog = catalog
-        for geometry in _iter_geometries(self):
-            for material in geometry.materials:
-                material._catalog = catalog
-        return self
+        return cls(root, resource, name, _root_pointer=root_pointer)
 
     def __iter__(self) -> Iterator[WbnBound]:
         yield from _iter_bounds((self.root,))
@@ -846,20 +836,18 @@ class WbnDocument:
 
 def load_wbn(
     source: str | Path | bytes | BinaryIO,
-    *,
-    materials: MaterialCatalog | None = None,
 ) -> WbnDocument:
     if isinstance(source, (str, Path)):
-        return WbnDocument.from_path(source, materials=materials)
+        return WbnDocument.from_path(source)
     if isinstance(source, bytes):
-        return WbnDocument.from_bytes(source, materials=materials)
-    return WbnDocument.from_bytes(source.read(), materials=materials)
+        return WbnDocument.from_bytes(source)
+    return WbnDocument.from_bytes(source.read())
 
 
 __all__ = [
     "WBN_BOUND_SIZE", "WBN_BVH_GEOMETRY_SIZE", "WBN_COMPOSITE_SIZE", "WBN_GEOMETRY_SIZE",
     "WBN_RESOURCE_VERSION", "WbnAabb", "WbnBound", "WbnBoundType", "WbnBvhGeometry",
     "WbnBvhNode", "WbnBvhSubTree", "WbnBvhTree", "WbnComposite", "WbnDocument",
-    "WbnGeometry", "WbnMaterial", "WbnMaterialFlags", "WbnMatrix", "WbnPolygon",
-    "WbnVector3", "WbnVector4", "WbnVertex", "load_wbn",
+    "WbnGeometry", "WbnMaterial", "WbnMaterialFlags", "WbnMaterialType", "WbnMatrix",
+    "WbnPolygon", "WbnVector3", "WbnVector4", "WbnVertex", "load_wbn",
 ]

@@ -7,10 +7,10 @@ import zlib
 
 from fourfury import (
     ImgArchive,
-    MaterialCatalog,
     WbdDocument,
     WbnComposite,
     WbnGeometry,
+    WbnMaterialType,
     joaat,
     load_wbd,
 )
@@ -62,15 +62,11 @@ class WbdTests(unittest.TestCase):
         self.assertEqual(len(document.bounds), 2)
 
     def test_fixed_size_edits_recompress_and_reparse(self) -> None:
-        rows = [
-            f"MAT_{index} GROUP DEFAULT 1.0 0.1 500.0 1.0 0.0 0 0.0 0.0 1.0 0.5 0 0 0 MAT_{index}"
-            for index in range(8)
-        ]
-        catalog = MaterialCatalog.from_text("2.00\n" + "\n".join(rows))
-        document = WbdDocument.from_bytes(_sample_wbd(), materials=catalog)
+        document = WbdDocument.from_bytes(_sample_wbd())
         geometry = document.geometries[0]
 
-        self.assertEqual(geometry.materials[0].name, "MAT_7")
+        self.assertEqual(geometry.materials[0].name, "RUMBLE_STRIP")
+        geometry.materials[0].material_type = WbnMaterialType.ROCK
         document.parent_dictionary = joaat("parent")
         document.usage_count = 2
         document.entries[1].name_hash = joaat("renamed_mesh")
@@ -82,6 +78,7 @@ class WbdTests(unittest.TestCase):
         self.assertEqual(reparsed.usage_count, 2)
         self.assertIsNotNone(reparsed.find_entry("renamed_mesh"))
         self.assertEqual(reparsed.geometries[0].vertices[1].x, 12)
+        self.assertIs(reparsed.geometries[0].materials[0].material_type, WbnMaterialType.ROCK)
 
     def test_rejects_dictionary_count_changes(self) -> None:
         document = WbdDocument.from_bytes(_sample_wbd())

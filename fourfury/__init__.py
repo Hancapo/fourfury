@@ -9,14 +9,7 @@ from .gtxd import (
 )
 from .img import IMG3_ENTRY_SIZE, IMG3_MAGIC, IMG3_VERSION, ImgArchive, ImgEntry, create_img, load_img
 from .ide import IdeDocument, IdeEntry, IdeLine, create_ide, load_ide
-from .materials import (
-    MATERIALS_RELATIVE_PATH,
-    MATERIALS_VERSION,
-    MaterialCatalog,
-    MaterialDefinition,
-    MaterialFlags,
-    load_materials,
-)
+from .materials import WbnMaterialType
 from .model import (
     ModelAabb,
     ModelAsset,
@@ -270,8 +263,7 @@ __all__ = [
     "GTAIVCrypto", "GTAIV_AES_KEY", "GTAIV_KEY_SHA1", "GTXD_SECTION", "GtxdDependency",
     "GtxdDocument", "GtxdHierarchy", "IMG3_ENTRY_SIZE", "IMG3_MAGIC",
     "IMG3_VERSION", "IdeDocument", "IdeEntry", "IdeLine", "ImgArchive", "ImgEntry",
-    "MATERIALS_RELATIVE_PATH", "MATERIALS_VERSION", "MaterialCatalog", "MaterialDefinition",
-    "MaterialFlags", "ModelAabb", "ModelAsset", "ModelBone", "ModelBoundingSphere",
+    "ModelAabb", "ModelAsset", "ModelBone", "ModelBoundingSphere",
     "ModelColor", "ModelColorChannel", "ModelCoordinateSystem", "ModelLight",
     "ModelLightType", "ModelLod", "ModelMaterial", "ModelMaterialParameter",
     "ModelMatrix4", "ModelMesh", "ModelObject", "ModelParameterKind",
@@ -294,7 +286,7 @@ __all__ = [
     "WBD_DICTIONARY_SIZE", "WBD_RESOURCE_VERSION", "WBN_RESOURCE_VERSION", "WPL_HEADER_SIZE",
     "WbdDocument", "WbdEntry", "WbnAabb", "WbnBound", "WbnBoundType",
     "WbnBvhGeometry", "WbnBvhNode", "WbnBvhSubTree", "WbnBvhTree", "WbnComposite",
-    "WbnDocument", "WbnGeometry", "WbnMaterial", "WbnMaterialFlags", "WbnMatrix",
+    "WbnDocument", "WbnGeometry", "WbnMaterial", "WbnMaterialFlags", "WbnMaterialType", "WbnMatrix",
     "WbnPolygon", "WbnVector3", "WbnVector4", "WbnVertex",
     "WDD_DICTIONARY_SIZE", "WDD_RESOURCE_VERSION", "WddDocument", "WddEntry",
     "WDR_DRAWABLE_SIZE", "WDR_GEOMETRY_SIZE", "WDR_INDEX_BUFFER_SIZE", "WDR_LIGHT_SIZE",
@@ -324,7 +316,7 @@ __all__ = [
     "WplTimeCycleModifier", "WplZone",
     "combine_nod_graphs", "combine_path_graphs", "create_gtxd", "create_ide", "create_img", "create_rpf", "create_wpl", "joaat",
     "explain_instance_flags", "explain_node_flags",
-    "extract_aes_key", "load_ide", "load_img", "load_materials", "load_nod", "load_nod_graph", "load_rpf", "load_wbn",
+    "extract_aes_key", "load_ide", "load_img", "load_nod", "load_nod_graph", "load_rpf", "load_wbn",
     "load_gtxd", "load_wbd", "load_wdd", "load_wdr", "load_wft", "load_wnv", "load_wpl", "load_wtd", "read_rsc5_texture_dictionary",
     "rsc5_physical_size", "rsc5_pointer_offset", "rsc5_virtual_size",
 ]

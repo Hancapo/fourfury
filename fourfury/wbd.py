@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import BinaryIO, Iterator
 
 from ._utils import atomic_write
-from .materials import MaterialCatalog
 from .rsc import RSC5_VIRTUAL_BASE, Rsc5Resource, rsc5_pointer_offset
 from .wbn import WbnBound, WbnGeometry, _WbnParser, _iter_bounds, _iter_geometries
 
@@ -48,7 +47,6 @@ class WbdDocument:
     usage_count: int = 1
     name: str = "bounds.wbd"
     source_path: str = ""
-    material_catalog: MaterialCatalog | None = field(default=None, repr=False, compare=False)
     _hashes_offset: int = field(default=0, repr=False, compare=False)
     _bounds_offset: int = field(default=0, repr=False, compare=False)
     _entry_count: int = field(default=0, repr=False, compare=False)
@@ -57,11 +55,9 @@ class WbdDocument:
     def from_path(
         cls,
         path: str | Path,
-        *,
-        materials: MaterialCatalog | None = None,
     ) -> "WbdDocument":
         source = Path(path)
-        document = cls.from_bytes(source.read_bytes(), name=source.name, materials=materials)
+        document = cls.from_bytes(source.read_bytes(), name=source.name)
         document.source_path = str(source)
         return document
 
@@ -71,7 +67,6 @@ class WbdDocument:
         data: bytes,
         *,
         name: str = "bounds.wbd",
-        materials: MaterialCatalog | None = None,
     ) -> "WbdDocument":
         resource = Rsc5Resource.from_bytes(data)
         if resource.version != WBD_RESOURCE_VERSION:
@@ -112,7 +107,7 @@ class WbdDocument:
             WbdEntry(int(name_hash), parser.parse_bound(rsc5_pointer_offset(bound_pointer)))
             for name_hash, bound_pointer in zip(hashes, bound_pointers, strict=True)
         ]
-        document = cls(
+        return cls(
             entries,
             resource,
             parent_dictionary,
@@ -122,9 +117,6 @@ class WbdDocument:
             _bounds_offset=bounds_offset,
             _entry_count=bound_count,
         )
-        if materials is not None:
-            document.bind_materials(materials)
-        return document
 
     def __len__(self) -> int:
         return len(self.entries)
@@ -154,13 +146,6 @@ class WbdDocument:
     @property
     def geometries(self) -> list[WbnGeometry]:
         return list(_iter_geometries(self.iter_bounds()))
-
-    def bind_materials(self, catalog: MaterialCatalog) -> "WbdDocument":
-        self.material_catalog = catalog
-        for geometry in _iter_geometries(self.iter_bounds()):
-            for material in geometry.materials:
-                material._catalog = catalog
-        return self
 
     def to_bytes(self) -> bytes:
         if len(self.entries) != self._entry_count:
@@ -192,14 +177,12 @@ class WbdDocument:
 
 def load_wbd(
     source: str | Path | bytes | BinaryIO,
-    *,
-    materials: MaterialCatalog | None = None,
 ) -> WbdDocument:
     if isinstance(source, (str, Path)):
-        return WbdDocument.from_path(source, materials=materials)
+        return WbdDocument.from_path(source)
     if isinstance(source, bytes):
-        return WbdDocument.from_bytes(source, materials=materials)
-    return WbdDocument.from_bytes(source.read(), materials=materials)
+        return WbdDocument.from_bytes(source)
+    return WbdDocument.from_bytes(source.read())
 
 
 __all__ = [

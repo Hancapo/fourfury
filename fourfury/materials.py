@@ -1,170 +1,167 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from enum import IntFlag
-from pathlib import Path
-from typing import BinaryIO, Iterator
+from enum import IntEnum
 
 
-MATERIALS_VERSION = 2.0
-MATERIALS_RELATIVE_PATH = Path("common/data/materials/materials.dat")
+class WbnMaterialType(IntEnum):
+    """Physical material IDs used by GTA IV collision bounds."""
+
+    DEFAULT = 0
+    NOFRICTION = 1
+    CAR_VOID = 2
+    CONCRETE = 3
+    CONCRETE_FREEWAY = 4
+    PAINTED_ROAD = 5
+    PLASTER_BOARD = 6
+    RUMBLE_STRIP = 7
+    TARMAC = 8
+    BREEZE_BLOCK = 9
+    MOSSY_ROCK = 10
+    ROCK = 11
+    STONE = 12
+    BRICK_COBBLE = 13
+    BRICK_WALL = 14
+    MARBLE = 15
+    PAVING_SLABS = 16
+    CERAMICS = 17
+    ROOFTILE = 18
+    RAIL_SLEEPER = 19
+    WOOD_BOARD = 20
+    WOOD_COUNTER = 21
+    WOOD_FENCE = 22
+    WOOD_HANDRAIL = 23
+    WOOD_SECTION = 24
+    WOOD_WALL_OLD = 25
+    WOODEN_GARAGE_DOOR = 26
+    LAMINATE = 27
+    POLISHED_COURT = 28
+    GRAVEL = 29
+    POTHOLE = 30
+    RAILWAY_GRAVEL = 31
+    SAND = 32
+    CLAY_COURT = 33
+    DIRT_DRY = 34
+    TWIGS = 35
+    MUD_SOFT = 36
+    GRASS = 37
+    SHORT_GRASS = 38
+    BUSHES = 39
+    FLOWERS = 40
+    LEAVES_PILE = 41
+    BARK_CHIPPING = 42
+    TREE_BARK_DARK = 43
+    TREE_BARK_LIGHT = 44
+    TREE_BARK_MED = 45
+    AIRCON_DUCT = 46
+    AIRCON_VENT = 47
+    BILLBOARD_FRAME = 48
+    CORRUGATED_IRON = 49
+    ELECTRICITY_BOX = 50
+    HOLLOW_METAL_PANEL = 51
+    HOLLOW_METAL_RAIL = 52
+    HOLLOW_RUST_METAL = 53
+    LEAD_ROOFING = 54
+    METAL_AWNING = 55
+    METAL_CELLAR = 56
+    METAL_DRAINAGE = 57
+    METAL_GARAGE_DOOR = 58
+    METAL_GRILL = 59
+    METAL_HELIPAD = 60
+    METAL_LATTICE = 61
+    METAL_MANHOLE = 62
+    METAL_RAILING = 63
+    METAL_ROLLER_DOOR = 64
+    METAL_TREAD_PLATE = 65
+    METAL_VENT_SUBWAY = 66
+    RAIL_CROSSING = 67
+    RAIL_TRACK = 68
+    ROLLER_DOOR = 69
+    SOLID_METAL_PANEL = 70
+    SOLID_RUST_METAL = 71
+    TREADPLATE_ON_WOOD = 72
+    GLASS_BRICK = 73
+    GLASS_MEDIUM = 74
+    GLASS_STRONG = 75
+    GLASS_WEAK = 76
+    PERSPEX = 77
+    SKYLIGHTS = 78
+    CAR_METAL = 79
+    CAR_PLASTIC = 80
+    WINDSCREEN = 81
+    CORRUGATED_PLASTIC = 82
+    FIBREGLASS = 83
+    PLASTIC = 84
+    TARPAULIN = 85
+    LINOLEUM = 86
+    CARPET = 87
+    FABRIC_CLOTH = 88
+    ROOFING_FELT = 89
+    RUG = 90
+    RUBBER = 91
+    PAPER = 92
+    CARDBOARD = 93
+    MATTRESS_FOAM = 94
+    PILLOW_FEATHERS = 95
+    POTHOLE_PUDDLE = 96
+    PUDDLES = 97
+    WATER = 98
+    PED = 99
+    BUTTOCKS = 100
+    THIGH_LEFT = 101
+    SHIN_LEFT = 102
+    FOOT_LEFT = 103
+    THIGH_RIGHT = 104
+    SHIN_RIGHT = 105
+    FOOT_RIGHT = 106
+    SPINE0 = 107
+    SPINE1 = 108
+    SPINE2 = 109
+    SPINE3 = 110
+    NECK = 111
+    HEAD = 112
+    CLAVICLE_LEFT = 113
+    UPPER_ARM_LEFT = 114
+    LOWER_ARM_LEFT = 115
+    HAND_LEFT = 116
+    CLAVICLE_RIGHT = 117
+    UPPER_ARM_RIGHT = 118
+    LOWER_ARM_RIGHT = 119
+    HAND_RIGHT = 120
+    LOWFRICTION_WHEEL = 121
+    HOLLOW_WOOD = 122
+    HOLLOW_PLASTIC = 123
+    HOLLOW_CARDBOARD = 124
+    HOLLOW_FIBREGLASS = 125
+    WINDSCREEN_WEAK = 126
+    WINDSCREEN_MED_WEAK = 127
+    WINDSCREEN_MED_STRONG = 128
+    WINDSCREEN_STRONG = 129
+    TVSCREEN = 130
+    VIDEOWALL = 131
+    POOLTABLE_SURFACE = 132
+    POOLTABLE_CUSHION = 133
+    POOLTABLE_BALL = 134
+    WINDSCREEN_SIDE_WEAK = 135
+    WINDSCREEN_SIDE_MED = 136
+    WINDSCREEN_REAR = 137
+    WINDSCREEN_FRONT = 138
+    FX_METAL_GAS_PIPE_FLAME = 139
+    FX_METAL_WATER_PIPE = 140
+    FX_METAL_STEAM_PIPE = 141
+    FX_METAL_OIL_GLUG = 142
+    FX_WOOD_WATER_GLUG = 143
+    FX_CERAMIC_WATER_HI_PRESSURE = 144
+    FX_METAL_ELECTRIC_SPARKS = 145
+    FX_SPARE_1 = 146
+    FX_SPARE_2 = 147
+    FX_SPARE_3 = 148
+    EMISSIVE_GLASS = 149
+    EMISSIVE_PLASTIC = 150
+    GLASS_STRONG_SHOOT_THRU = 151
+    GRASS_PATCHY = 152
+    GRASS_LONG = 153
+    CARPET_FABRIC = 154
+    POOLTABLE_POCKET = 155
 
 
-class MaterialFlags(IntFlag):
-    NONE = 0
-    SEE_THROUGH = 0x1
-    SHOOT_THROUGH = 0x2
-    NATURALLY_WET = 0x4
-
-
-@dataclass(frozen=True, slots=True)
-class MaterialDefinition:
-    material_id: int
-    name: str
-    fx_group: str
-    helicopter_fx: str
-    friction: float
-    elasticity: float
-    density: float
-    tyre_grip: float
-    wet_grip: float
-    roughness: int
-    pedestrian_density: float
-    flammability: float
-    burn_time: float
-    burn_strength: float
-    flags: MaterialFlags
-    display_name: str
-    line_number: int | None = field(default=None, compare=False)
-
-    @property
-    def see_through(self) -> bool:
-        return bool(self.flags & MaterialFlags.SEE_THROUGH)
-
-    @property
-    def shoot_through(self) -> bool:
-        return bool(self.flags & MaterialFlags.SHOOT_THROUGH)
-
-    @property
-    def naturally_wet(self) -> bool:
-        return bool(self.flags & MaterialFlags.NATURALLY_WET)
-
-
-@dataclass(slots=True)
-class MaterialCatalog:
-    version: float
-    materials: tuple[MaterialDefinition, ...]
-    source_path: str = ""
-    _by_name: dict[str, MaterialDefinition] = field(default_factory=dict, init=False, repr=False, compare=False)
-
-    def __post_init__(self) -> None:
-        if any(material.material_id != index for index, material in enumerate(self.materials)):
-            raise ValueError("materials.dat IDs must match their file order")
-        self._by_name = {material.name.casefold(): material for material in self.materials}
-        if len(self._by_name) != len(self.materials):
-            raise ValueError("materials.dat contains duplicate material names")
-
-    @classmethod
-    def from_game(cls, game_path: str | Path) -> "MaterialCatalog":
-        return cls.from_path(Path(game_path) / MATERIALS_RELATIVE_PATH)
-
-    @classmethod
-    def from_path(cls, path: str | Path, *, encoding: str = "utf-8-sig") -> "MaterialCatalog":
-        source = Path(path)
-        catalog = cls.from_bytes(source.read_bytes(), encoding=encoding)
-        catalog.source_path = str(source)
-        return catalog
-
-    @classmethod
-    def from_bytes(cls, data: bytes, *, encoding: str = "utf-8-sig") -> "MaterialCatalog":
-        return cls.from_text(data.decode(encoding))
-
-    @classmethod
-    def from_text(cls, text: str) -> "MaterialCatalog":
-        version: float | None = None
-        materials: list[MaterialDefinition] = []
-        for line_number, line in enumerate(text.splitlines(), 1):
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            if version is None:
-                try:
-                    version = float(stripped)
-                except ValueError as exc:
-                    raise ValueError("materials.dat does not start with a numeric version") from exc
-                if version != MATERIALS_VERSION:
-                    raise ValueError(f"unsupported materials.dat version: {version:g}")
-                continue
-            values = stripped.split()
-            if len(values) != 17:
-                raise ValueError(
-                    f"invalid materials.dat record on line {line_number}: expected 17 fields, got {len(values)}"
-                )
-            try:
-                flag_values = tuple(int(value, 10) for value in values[13:16])
-                if any(value not in (0, 1) for value in flag_values):
-                    raise ValueError("material flags must be 0 or 1")
-                flags = MaterialFlags(
-                    (flag_values[0] << 0) | (flag_values[1] << 1) | (flag_values[2] << 2)
-                )
-                material = MaterialDefinition(
-                    material_id=len(materials),
-                    name=values[0],
-                    fx_group=values[1],
-                    helicopter_fx=values[2],
-                    friction=float(values[3]),
-                    elasticity=float(values[4]),
-                    density=float(values[5]),
-                    tyre_grip=float(values[6]),
-                    wet_grip=float(values[7]),
-                    roughness=int(values[8], 10),
-                    pedestrian_density=float(values[9]),
-                    flammability=float(values[10]),
-                    burn_time=float(values[11]),
-                    burn_strength=float(values[12]),
-                    flags=flags,
-                    display_name=values[16],
-                    line_number=line_number,
-                )
-            except ValueError as exc:
-                raise ValueError(f"invalid materials.dat value on line {line_number}: {exc}") from exc
-            materials.append(material)
-        if version is None:
-            raise ValueError("empty materials.dat")
-        if len(materials) > 0x100:
-            raise ValueError("materials.dat exceeds the 256 IDs representable by WBN")
-        return cls(version, tuple(materials))
-
-    def __len__(self) -> int:
-        return len(self.materials)
-
-    def __iter__(self) -> Iterator[MaterialDefinition]:
-        return iter(self.materials)
-
-    def __getitem__(self, key: int | str) -> MaterialDefinition:
-        if isinstance(key, int):
-            return self.materials[key]
-        return self._by_name[key.casefold()]
-
-    def get(self, key: int | str) -> MaterialDefinition | None:
-        if isinstance(key, int):
-            return self.materials[key] if 0 <= key < len(self.materials) else None
-        return self._by_name.get(key.casefold())
-
-
-def load_materials(
-    source: str | Path | bytes | BinaryIO,
-    *,
-    encoding: str = "utf-8-sig",
-) -> MaterialCatalog:
-    if isinstance(source, (str, Path)):
-        return MaterialCatalog.from_path(source, encoding=encoding)
-    if isinstance(source, bytes):
-        return MaterialCatalog.from_bytes(source, encoding=encoding)
-    return MaterialCatalog.from_bytes(source.read(), encoding=encoding)
-
-
-__all__ = [
-    "MATERIALS_RELATIVE_PATH", "MATERIALS_VERSION", "MaterialCatalog", "MaterialDefinition",
-    "MaterialFlags", "load_materials",
-]
+__all__ = ["WbnMaterialType"]
