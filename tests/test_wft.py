@@ -9,14 +9,17 @@ from dataclasses import replace
 from fourfury import (
     WFT_RESOURCE_VERSION,
     FragmentAsset,
+    FragmentGroup,
     WdrShaderGroup,
     WftDampingKind,
     WftDocument,
     WftFragmentDrawable,
     WftFragmentFlags,
     WftGroupFlags,
+    WftIssueSeverity,
     explain_group_flags,
     load_wft,
+    validate_wft_fragment,
 )
 
 VIRTUAL_BASE = 0x50000000
@@ -130,6 +133,7 @@ class WftTests(unittest.TestCase):
         self.assertTrue(group.is_root)  # type: ignore[union-attr]
         self.assertEqual(group.children, fragment.children)  # type: ignore[union-attr]
         self.assertIs(fragment.children[0].group, group)
+        self.assertIs(fragment.root_child, fragment.children[0])
         self.assertEqual(fragment.children[0].bone_index, 7)
         self.assertIs(fragment.children[0].undamaged_drawable, fragment.drawable)
 
@@ -183,8 +187,59 @@ class WftTests(unittest.TestCase):
         self.assertEqual(fragment.pieces[0].bone_index, 7)
         self.assertEqual(fragment.pieces[0].inertia, (1.0, 2.0, 3.0, 50.0))
         self.assertEqual(fragment.pieces[0].physics_transform[:4], (1.0, 0.0, 0.0, 0.0))
+        self.assertIsInstance(fragment.groups[0], FragmentGroup)
+        self.assertEqual(fragment.groups[0].piece_indices, (0,))
         self.assertEqual(fragment.models, document.to_models())
         self.assertEqual(fragment.to_data()["pieces"][0]["name"], "chassis")
+
+    def test_models_group_hierarchy_explicitly(self) -> None:
+        document = WftDocument.from_bytes(_sample_wft(), name="sample.wft")
+        root = document.groups[0]
+        child_group = replace(
+            root,
+            name="door",
+            child_group_index=0,
+            parent_group_index=0,
+            child_index=1,
+            child_count=0,
+            child_group_count=0,
+            children=(),
+            index=1,
+            parent=root,
+            child_groups=(),
+        )
+        root.child_group_index = 1
+        root.child_group_count = 1
+        root.child_groups = (child_group,)
+        document.fragment.groups = (root, child_group)
+
+        self.assertEqual(root.index, 0)
+        self.assertIs(child_group.parent, root)
+        self.assertEqual(child_group.depth, 1)
+        self.assertEqual(child_group.ancestors, (root,))
+        self.assertEqual(tuple(root.iter_descendants()), (child_group,))
+        self.assertEqual(document.validate(), ())
+        self.assertEqual(validate_wft_fragment(document.fragment), ())
+
+        projected = document.to_fragment()
+        self.assertEqual(projected.groups[0].child_group_indices, (1,))
+        self.assertEqual(projected.groups[1].parent_index, 0)
+        self.assertIs(projected.find_group("DOOR"), projected.groups[1])
+
+    def test_reports_structural_hierarchy_issues(self) -> None:
+        document = WftDocument.from_bytes(_sample_wft())
+        document.fragment.root_child_index = 10
+        document.groups[0].parent_group_index = 0
+
+        issues = document.validate()
+        codes = {issue.code for issue in issues}
+
+        self.assertIn("root_group_count_mismatch", codes)
+        self.assertIn("root_child_out_of_range", codes)
+        self.assertIn("group_self_parent", codes)
+        self.assertIn("group_hierarchy_cycle", codes)
+        self.assertTrue(all(issue.severity is WftIssueSeverity.ERROR for issue in issues))
+        self.assertEqual(issues[0].to_data()["severity"], "error")
 
     def test_child_drawables_inherit_the_common_shader_group(self) -> None:
         document = WftDocument.from_bytes(_sample_wft(), name="sample.wft")

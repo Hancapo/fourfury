@@ -24,7 +24,7 @@ from .animation import (
     normalize_quaternion,
 )
 from .crypto import GTAIVCrypto, GTAIV_AES_KEY, GTAIV_KEY_SHA1, extract_aes_key
-from .fragment import FragmentAsset, FragmentMatrix3x4, FragmentPiece
+from .fragment import FragmentAsset, FragmentGroup, FragmentMatrix3x4, FragmentPiece
 from .gtxd import (
     GTXD_SECTION,
     GtxdDependency,
@@ -302,13 +302,16 @@ from .wft import (
     WftFragmentFlags,
     WftGroup,
     WftGroupFlags,
+    WftIssueSeverity,
     WftMatrix3x4,
     WftPhysicsArchetype,
     WftSelfCollision,
+    WftValidationIssue,
     explain_child_flags,
     explain_fragment_flags,
     explain_group_flags,
     load_wft,
+    validate_wft_fragment,
 )
 from .wnv import (
     WNV_AABB_SCALE,
@@ -390,7 +393,7 @@ __version__ = "0.2.0"
 __all__ = [
     "AnimationScalar", "AnimationTrackFrame", "AnimationTrackInterpolation",
     "AnimationTrackTarget", "AnimationTrackValue", "AnimationValue",
-    "FragmentAsset", "FragmentMatrix3x4", "FragmentPiece",
+    "FragmentAsset", "FragmentGroup", "FragmentMatrix3x4", "FragmentPiece",
     "GTAIVCrypto", "GTAIV_AES_KEY", "GTAIV_KEY_SHA1", "GTXD_SECTION", "GtxdDependency",
     "GtxdDocument", "GtxdHierarchy", "IMG3_ENTRY_SIZE", "IMG3_MAGIC",
     "IMG3_VERSION", "IDE_ARCHETYPE_SECTIONS", "IdeArchetype", "IdeArchetypeFlags",
@@ -462,7 +465,8 @@ __all__ = [
     "WftDampingKind", "WftDocument", "WftEventReferences", "WftFlag",
     "WftFlagConfidence", "WftFlagInfo", "WftFragment",
     "WftFragmentDrawable", "WftFragmentFlags", "WftGroup", "WftGroupFlags",
-    "WftMatrix3x4", "WftPhysicsArchetype", "WftSelfCollision",
+    "WftIssueSeverity", "WftMatrix3x4", "WftPhysicsArchetype",
+    "WftSelfCollision", "WftValidationIssue",
     "WNV_AABB_SCALE", "WNV_COVER_POINT_SIZE", "WNV_EDGE_SIZE", "WNV_HEADER_SIZE",
     "WNV_POLYGON_SIZE", "WNV_QUADTREE_DATA_SIZE", "WNV_QUADTREE_SIZE",
     "WNV_QUANTIZED_SCALE", "WNV_RESOURCE_VERSION", "WNV_VERTEX_SIZE", "WnvAabb",
@@ -484,5 +488,6 @@ __all__ = [
     "load_gtxd", "load_wad", "load_water", "load_wbd", "load_wdd", "load_wdr", "load_wft",
     "load_wnv", "load_wpl", "load_wtd", "read_rsc5_texture_dictionary",
     "parse_mlo_archetypes", "rsc5_physical_size", "rsc5_pointer_offset", "rsc5_virtual_size",
-    "validate_wad_animation", "validate_wad_document", "wad_animation_hash",
+    "validate_wad_animation", "validate_wad_document", "validate_wft_fragment",
+    "wad_animation_hash",
 ]
