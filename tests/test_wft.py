@@ -4,11 +4,15 @@ import io
 import struct
 import unittest
 import zlib
+from dataclasses import replace
 
 from fourfury import (
     WFT_RESOURCE_VERSION,
+    FragmentAsset,
+    WdrShaderGroup,
     WftDampingKind,
     WftDocument,
+    WftFragmentDrawable,
     WftFragmentFlags,
     WftGroupFlags,
     explain_group_flags,
@@ -165,6 +169,59 @@ class WftTests(unittest.TestCase):
 
         self.assertIs(child.undamaged_drawable, document.drawable)
         self.assertIs(child._undamaged_drawable, document.drawable)
+
+    def test_projects_every_piece_into_neutral_fragment_data(self) -> None:
+        document = WftDocument.from_bytes(_sample_wft(), name="sample.wft")
+
+        fragment = document.to_fragment()
+
+        self.assertIsInstance(fragment, FragmentAsset)
+        self.assertEqual(fragment.name, "sample")
+        self.assertEqual(len(fragment.pieces), 1)
+        self.assertIs(fragment.pieces[0].undamaged_model, fragment.common_model)
+        self.assertEqual(fragment.pieces[0].group_index, 0)
+        self.assertEqual(fragment.pieces[0].bone_index, 7)
+        self.assertEqual(fragment.pieces[0].inertia, (1.0, 2.0, 3.0, 50.0))
+        self.assertEqual(fragment.pieces[0].physics_transform[:4], (1.0, 0.0, 0.0, 0.0))
+        self.assertEqual(fragment.models, document.to_models())
+        self.assertEqual(fragment.to_data()["pieces"][0]["name"], "chassis")
+
+    def test_child_drawables_inherit_the_common_shader_group(self) -> None:
+        document = WftDocument.from_bytes(_sample_wft(), name="sample.wft")
+        common = document.drawable
+        assert common is not None
+        common.drawable.shader_group = WdrShaderGroup(
+            shaders=(),
+            texture_dictionary_pointer=0,
+            vertex_declaration_usage_flags=(),
+            reserved=(0,) * 12,
+            reserved_data=(),
+            texture_dictionary=None,
+            _pointer=0,
+        )
+        child = document.children[0]
+        inherited = WftFragmentDrawable(
+            name="piece",
+            drawable=replace(common.drawable, shader_group=None),
+            fragment_matrix=common.fragment_matrix,
+            bound=common.bound,
+            fragment_matrix_indices=common.fragment_matrix_indices,
+            fragment_matrices=common.fragment_matrices,
+            pointer=VIRTUAL_BASE | 0x1000,
+            inherited_shader_group=common.shader_group,
+        )
+        child._undamaged_drawable_pointer = inherited.pointer
+        child._undamaged_drawable = inherited
+
+        piece = document.to_fragment().pieces[0]
+
+        self.assertIsNone(inherited.serialized_shader_group)
+        self.assertTrue(inherited.uses_inherited_shader_group)
+        self.assertIs(inherited.shader_group, common.shader_group)
+        self.assertEqual(
+            piece.undamaged_model.materials,  # type: ignore[union-attr]
+            document.to_model().materials,
+        )
 
     def test_loads_stream_and_preserves_resource_losslessly(self) -> None:
         source = _sample_wft()

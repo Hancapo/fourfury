@@ -28,7 +28,7 @@ animation dictionaries, and related metadata.
 | WAD | Yes | No | Animation dictionaries, tracks, chunks, and decoded channels |
 | WDD | Yes | No | Hash-addressed drawable dictionaries and neutral model projection |
 | WDR | Yes | No | Drawables plus neutral model projection |
-| WFT | Yes | No | Fragment drawables, physics hierarchy, and collision bounds |
+| WFT | Yes | No | Fragment drawables, physics hierarchy, collision bounds, and complete neutral fragment projection |
 | WTD | Yes | No | Texture dictionaries and DDS export |
 
 See [DOCUMENTATION.md](DOCUMENTATION.md) for examples, field behavior, writer
