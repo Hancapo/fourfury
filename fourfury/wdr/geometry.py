@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import IntEnum
 
@@ -108,6 +109,109 @@ class WdrVertexLayout:
 
 
 VertexValue = float | int | tuple[float | int, ...]
+VertexChannels = dict[WdrVertexSemantic, tuple[VertexValue, ...]]
+
+
+class _LazyAttributeChannels(VertexChannels):
+    """Dictionary-compatible vertex channels decoded on their first access."""
+
+    def __init__(self, loader: Callable[[], VertexChannels]) -> None:
+        super().__init__()
+        self._loader: Callable[[], VertexChannels] | None = loader
+
+    @property
+    def is_loaded(self) -> bool:
+        return self._loader is None
+
+    def _load(self) -> None:
+        loader = self._loader
+        if loader is None:
+            return
+        values = loader()
+        super().update(values)
+        self._loader = None
+
+    def __getitem__(
+        self,
+        key: WdrVertexSemantic,
+    ) -> tuple[VertexValue, ...]:
+        self._load()
+        return super().__getitem__(key)
+
+    def __setitem__(
+        self,
+        key: WdrVertexSemantic,
+        value: tuple[VertexValue, ...],
+    ) -> None:
+        self._load()
+        super().__setitem__(key, value)
+
+    def __delitem__(self, key: WdrVertexSemantic) -> None:
+        self._load()
+        super().__delitem__(key)
+
+    def __iter__(self):
+        self._load()
+        return super().__iter__()
+
+    def __len__(self) -> int:
+        self._load()
+        return super().__len__()
+
+    def __contains__(self, key: object) -> bool:
+        self._load()
+        return super().__contains__(key)
+
+    def __repr__(self) -> str:
+        if not self.is_loaded:
+            return "<lazy WDR vertex channels>"
+        return super().__repr__()
+
+    def __eq__(self, other: object) -> bool:
+        self._load()
+        if isinstance(other, _LazyAttributeChannels):
+            other._load()
+        return super().__eq__(other)
+
+    def get(self, key: WdrVertexSemantic, default=None):
+        self._load()
+        return super().get(key, default)
+
+    def items(self):
+        self._load()
+        return super().items()
+
+    def keys(self):
+        self._load()
+        return super().keys()
+
+    def values(self):
+        self._load()
+        return super().values()
+
+    def copy(self) -> VertexChannels:
+        self._load()
+        return super().copy()
+
+    def clear(self) -> None:
+        self._load()
+        super().clear()
+
+    def pop(self, key: WdrVertexSemantic, default=None):
+        self._load()
+        return super().pop(key, default)
+
+    def popitem(self):
+        self._load()
+        return super().popitem()
+
+    def setdefault(self, key: WdrVertexSemantic, default=()):
+        self._load()
+        return super().setdefault(key, default)
+
+    def update(self, *args, **kwargs) -> None:
+        self._load()
+        super().update(*args, **kwargs)
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,7 +277,7 @@ class WdrVertexBuffer:
     lock_thread_id: int
     vertex_data: bytes
     d3d_vertex_buffer: int
-    attribute_channels: dict[WdrVertexSemantic, tuple[VertexValue, ...]]
+    attribute_channels: VertexChannels
     _pointer: int = field(repr=False, compare=False)
     _vertices: tuple[WdrVertex, ...] | None = field(
         default=None,
@@ -193,6 +297,11 @@ class WdrVertexBuffer:
                 for index in range(self.vertex_count)
             )
         return self._vertices
+
+    @property
+    def are_attribute_channels_loaded(self) -> bool:
+        channels = self.attribute_channels
+        return not isinstance(channels, _LazyAttributeChannels) or channels.is_loaded
 
     @property
     def data(self) -> bytes:

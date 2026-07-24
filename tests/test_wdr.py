@@ -281,10 +281,14 @@ class WdrTests(unittest.TestCase):
 
         self.assertIsNotNone(buffer)
         self.assertIsNone(buffer._vertices)  # type: ignore[union-attr]
+        self.assertFalse(buffer.are_attribute_channels_loaded)  # type: ignore[union-attr]
+        self.assertIn("lazy WDR vertex channels", repr(buffer))  # type: ignore[arg-type]
+        self.assertFalse(buffer.are_attribute_channels_loaded)  # type: ignore[union-attr]
         self.assertEqual(
             buffer.attribute_channels[WdrVertexSemantic.POSITION][1],  # type: ignore[union-attr]
             (1.0, 0.0, 0.0),
         )
+        self.assertTrue(buffer.are_attribute_channels_loaded)  # type: ignore[union-attr]
 
         model = document.to_model()
 
