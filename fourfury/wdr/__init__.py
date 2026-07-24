@@ -4,12 +4,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
-from ._utils import atomic_write
-from .model import ModelAabb, ModelAsset, ModelBoundingSphere
-from .rsc import Rsc5Resource
-from .shaders import WdrShaderPreset, WdrShaderProgram
-from .wtd import Rsc5Texture, Rsc5TextureDictionary
-from ._wdr_constants import (
+from .._utils import atomic_write
+from ..model import ModelAabb, ModelAsset, ModelBoundingSphere
+from ..rsc import Rsc5Resource
+from ..shaders import WdrShaderPreset, WdrShaderProgram
+from ..wtd import Rsc5Texture, Rsc5TextureDictionary
+from .constants import (
     WDR_DRAWABLE_SIZE,
     WDR_GEOMETRY_SIZE,
     WDR_INDEX_BUFFER_SIZE,
@@ -22,7 +22,7 @@ from ._wdr_constants import (
     WDR_VERTEX_BUFFER_SIZE,
     WDR_VERTEX_LAYOUT_SIZE,
 )
-from ._wdr_geometry import (
+from .geometry import (
     WdrDrawableLod,
     WdrDrawableModel,
     WdrGeometry,
@@ -36,15 +36,15 @@ from ._wdr_geometry import (
     WdrVertexLayout,
     WdrVertexSemantic,
 )
-from ._wdr_material import (
+from .material import (
     WdrShader,
     WdrShaderGroup,
     WdrShaderParameter,
     WdrTextureReference,
 )
-from ._wdr_math import WdrMatrix4, WdrVector2, WdrVector3, WdrVector4
-from ._wdr_reader import _WdrReader as _WdrReaderBase
-from ._wdr_scene import (
+from .math import WdrMatrix4, WdrVector2, WdrVector3, WdrVector4
+from .reader import _WdrReader as _WdrReaderBase
+from .scene import (
     WdrBone,
     WdrBoneFlags,
     WdrBoneId,
@@ -58,13 +58,13 @@ from ._wdr_scene import (
 )
 
 try:
-    from ._native import decode_wdr_vertices as _native_decode_wdr_vertices
+    from .._native import decode_wdr_vertices as _native_decode_wdr_vertices
 except ImportError:
     _native_decode_wdr_vertices = None
 
 
 class _WdrReader(_WdrReaderBase):
-    """Compatibility façade whose decoder follows ``fourfury.wdr`` state."""
+    """Compatibility facade whose decoder follows ``fourfury.wdr`` state."""
 
     def __init__(self, resource: Rsc5Resource) -> None:
         super().__init__(resource, lambda: _native_decode_wdr_vertices)
@@ -247,7 +247,7 @@ for _public_name in __all__:
     _public_value = globals().get(_public_name)
     if (
         isinstance(_public_value, type)
-        and _public_value.__module__.startswith("fourfury._wdr_")
+        and _public_value.__module__.startswith("fourfury.wdr.")
     ):
         _public_value.__module__ = __name__
 del _public_name, _public_value
