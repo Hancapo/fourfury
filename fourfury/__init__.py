@@ -110,6 +110,28 @@ from .shaders import (
     find_wdr_shader_definition,
     find_wdr_shader_program,
 )
+from .wad import (
+    WAD_ANIMATION_SIZE,
+    WAD_CHANNEL_HEADER_SIZE,
+    WAD_CHUNK_SIZE,
+    WAD_DICTIONARY_SIZE,
+    WAD_RESOURCE_VERSION,
+    WAD_TRACK_SIZE,
+    WadAnimation,
+    WadAnimationFlags,
+    WadBoneId,
+    WadBoneName,
+    WadChannel,
+    WadChannelType,
+    WadChunk,
+    WadDocument,
+    WadEntry,
+    WadTrack,
+    WadTrackId,
+    WadTrackPacking,
+    WadTrackType,
+    load_wad,
+)
 from .wbd import WBD_DICTIONARY_SIZE, WBD_RESOURCE_VERSION, WbdDocument, WbdEntry, joaat, load_wbd
 from .wbn import (
     WBN_BOUND_SIZE,
@@ -295,6 +317,11 @@ __all__ = [
     "RSC5_VIRTUAL_BASE", "RpfArchive",
     "RpfDirectoryEntry", "RpfEntry", "RpfFileEntry", "Rsc5Resource", "Rsc5Texture",
     "Rsc5TextureDictionary", "Rsc5TextureFormat", "WBN_BOUND_SIZE",
+    "WAD_ANIMATION_SIZE", "WAD_CHANNEL_HEADER_SIZE", "WAD_CHUNK_SIZE",
+    "WAD_DICTIONARY_SIZE", "WAD_RESOURCE_VERSION", "WAD_TRACK_SIZE",
+    "WadAnimation", "WadAnimationFlags", "WadBoneId", "WadBoneName",
+    "WadChannel", "WadChannelType", "WadChunk", "WadDocument", "WadEntry",
+    "WadTrack", "WadTrackId", "WadTrackPacking", "WadTrackType",
     "WBN_BVH_GEOMETRY_SIZE", "WBN_COMPOSITE_SIZE", "WBN_GEOMETRY_SIZE",
     "WBD_DICTIONARY_SIZE", "WBD_RESOURCE_VERSION", "WBN_RESOURCE_VERSION", "WPL_HEADER_SIZE",
     "WbdDocument", "WbdEntry", "WbnAabb", "WbnBound", "WbnBoundType",
@@ -335,6 +362,6 @@ __all__ = [
     "explain_instance_flags", "explain_node_flags", "find_wdr_shader_definition",
     "find_wdr_shader_program",
     "extract_aes_key", "load_ide", "load_img", "load_nod", "load_nod_graph", "load_rpf", "load_wbn",
-    "load_gtxd", "load_wbd", "load_wdd", "load_wdr", "load_wft", "load_wnv", "load_wpl", "load_wtd", "read_rsc5_texture_dictionary",
+    "load_gtxd", "load_wad", "load_wbd", "load_wdd", "load_wdr", "load_wft", "load_wnv", "load_wpl", "load_wtd", "read_rsc5_texture_dictionary",
     "rsc5_physical_size", "rsc5_pointer_offset", "rsc5_virtual_size",
 ]
