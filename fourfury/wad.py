@@ -363,15 +363,13 @@ Scalar = float | int
 ChannelValue = Scalar | tuple[float, ...]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False, eq=False)
 class WadChannel:
     channel_type: WadChannelType
     flags: int
-    values: tuple[Scalar, ...] = ()
     vector: tuple[float, ...] | None = None
     scale: float | None = None
     offset: float | None = None
-    quantized_values: tuple[int, ...] = ()
     run_values: tuple[int, ...] = ()
     packed_sequence: tuple[int, ...] = ()
     packed_sequence_words: tuple[int, ...] = ()
@@ -379,6 +377,179 @@ class WadChannel:
     packed_sequence_divisor: int = 0
     vft: int = field(default=0, repr=False, compare=False)
     pointer: int = field(default=0, repr=False, compare=False)
+    _values: tuple[Scalar, ...] = field(default=(), repr=False)
+    _quantized_values: tuple[int, ...] = field(default=(), repr=False)
+    _raw_data: bytes = field(default=b"", repr=False, compare=False)
+    _raw_code: str = field(default="", repr=False, compare=False)
+    _raw_count: int = field(default=0, repr=False, compare=False)
+    _quantized_data: bytes = field(default=b"", repr=False, compare=False)
+    _quantized_element_size: int = field(default=0, repr=False, compare=False)
+    _quantized_element_count: int = field(default=0, repr=False, compare=False)
+
+    def __init__(
+        self,
+        channel_type: WadChannelType,
+        flags: int,
+        values: tuple[Scalar, ...] = (),
+        vector: tuple[float, ...] | None = None,
+        scale: float | None = None,
+        offset: float | None = None,
+        quantized_values: tuple[int, ...] = (),
+        run_values: tuple[int, ...] = (),
+        packed_sequence: tuple[int, ...] = (),
+        packed_sequence_words: tuple[int, ...] = (),
+        packed_sequence_bit_count: int = 0,
+        packed_sequence_divisor: int = 0,
+        vft: int = 0,
+        pointer: int = 0,
+        *,
+        _raw_data: bytes = b"",
+        _raw_code: str = "",
+        _raw_count: int = 0,
+        _quantized_data: bytes = b"",
+        _quantized_element_size: int = 0,
+        _quantized_element_count: int = 0,
+    ) -> None:
+        object.__setattr__(self, "channel_type", channel_type)
+        object.__setattr__(self, "flags", flags)
+        object.__setattr__(self, "vector", vector)
+        object.__setattr__(self, "scale", scale)
+        object.__setattr__(self, "offset", offset)
+        object.__setattr__(self, "run_values", tuple(run_values))
+        object.__setattr__(self, "packed_sequence", tuple(packed_sequence))
+        object.__setattr__(
+            self,
+            "packed_sequence_words",
+            tuple(packed_sequence_words),
+        )
+        object.__setattr__(
+            self,
+            "packed_sequence_bit_count",
+            packed_sequence_bit_count,
+        )
+        object.__setattr__(
+            self,
+            "packed_sequence_divisor",
+            packed_sequence_divisor,
+        )
+        object.__setattr__(self, "vft", vft)
+        object.__setattr__(self, "pointer", pointer)
+        object.__setattr__(self, "_values", tuple(values))
+        object.__setattr__(self, "_quantized_values", tuple(quantized_values))
+        object.__setattr__(self, "_raw_data", _raw_data)
+        object.__setattr__(self, "_raw_code", _raw_code)
+        object.__setattr__(self, "_raw_count", _raw_count)
+        object.__setattr__(self, "_quantized_data", _quantized_data)
+        object.__setattr__(
+            self,
+            "_quantized_element_size",
+            _quantized_element_size,
+        )
+        object.__setattr__(
+            self,
+            "_quantized_element_count",
+            _quantized_element_count,
+        )
+
+    @property
+    def values(self) -> tuple[Scalar, ...]:
+        values = self._values
+        if not values and self._raw_data:
+            values = struct.unpack(
+                f"<{self._raw_count}{self._raw_code}",
+                self._raw_data,
+            )
+            object.__setattr__(self, "_values", values)
+        elif (
+            not values
+            and self._quantized_data
+            and self._quantized_element_count
+            and self.scale is not None
+            and self.offset is not None
+        ):
+            values = tuple(
+                (self._quantized_value_at(index) * self.scale) + self.offset
+                for index in range(self._quantized_element_count)
+            )
+            object.__setattr__(self, "_values", values)
+        return values
+
+    @property
+    def quantized_values(self) -> tuple[int, ...]:
+        values = self._quantized_values
+        if (
+            not values
+            and self._quantized_data
+            and self._quantized_element_count
+        ):
+            values = tuple(
+                self._quantized_value_at(index)
+                for index in range(self._quantized_element_count)
+            )
+            object.__setattr__(self, "_quantized_values", values)
+        return values
+
+    def _quantized_value_at(self, index: int) -> int:
+        bit_address = index * self._quantized_element_size
+        block = bit_address >> 5
+        bit = bit_address & 31
+        low = struct.unpack_from("<I", self._quantized_data, block * 4)[0]
+        high = struct.unpack_from("<I", self._quantized_data, (block + 1) * 4)[0]
+        mask = (
+            0xFFFFFFFF
+            if self._quantized_element_size == 32
+            else (1 << self._quantized_element_size) - 1
+        )
+        return ((low | (high << 32)) >> bit) & mask
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, WadChannel):
+            return NotImplemented
+        return (
+            self.channel_type,
+            self.flags,
+            self.values,
+            self.vector,
+            self.scale,
+            self.offset,
+            self.quantized_values,
+            self.run_values,
+            self.packed_sequence,
+            self.packed_sequence_words,
+            self.packed_sequence_bit_count,
+            self.packed_sequence_divisor,
+        ) == (
+            other.channel_type,
+            other.flags,
+            other.values,
+            other.vector,
+            other.scale,
+            other.offset,
+            other.quantized_values,
+            other.run_values,
+            other.packed_sequence,
+            other.packed_sequence_words,
+            other.packed_sequence_bit_count,
+            other.packed_sequence_divisor,
+        )
+
+    def __hash__(self) -> int:
+        return hash(
+            (
+                self.channel_type,
+                self.flags,
+                self.values,
+                self.vector,
+                self.scale,
+                self.offset,
+                self.quantized_values,
+                self.run_values,
+                self.packed_sequence,
+                self.packed_sequence_words,
+                self.packed_sequence_bit_count,
+                self.packed_sequence_divisor,
+            )
+        )
 
     @property
     def is_static(self) -> bool:
@@ -406,6 +577,21 @@ class WadChannel:
             )
         if self.vector is not None:
             return self.vector
+        if self._raw_data:
+            index = frame % self._raw_count
+            return struct.unpack_from(
+                f"<{self._raw_code}",
+                self._raw_data,
+                index * struct.calcsize(self._raw_code),
+            )[0]
+        if (
+            self._quantized_data
+            and self._quantized_element_count
+            and self.scale is not None
+            and self.offset is not None
+        ):
+            index = frame % self._quantized_element_count
+            return (self._quantized_value_at(index) * self.scale) + self.offset
         if not self.values:
             return 0.0
         return self.values[frame % len(self.values)]
@@ -442,27 +628,42 @@ class WadTrack:
     frames_per_chunk: int
     flags: int
     pointer: int = field(default=0, repr=False, compare=False)
+    _chunks_by_target: dict[tuple[int, int], WadChunk] = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _chunks_by_bone: dict[int, WadChunk] = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _chunks_by_track: dict[int, WadChunk] = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
-    def find_chunk(self, bone_id: int, track_id: int | WadTrackId | None = None) -> WadChunk | None:
-        track_value = None if track_id is None else int(track_id)
+    def __post_init__(self) -> None:
+        by_target: dict[tuple[int, int], WadChunk] = {}
+        by_bone: dict[int, WadChunk] = {}
+        by_track: dict[int, WadChunk] = {}
         for chunk in self.chunks:
             identifier = chunk.bone_id
-            if identifier.bone_id != bone_id:
-                continue
-            if track_value is None or identifier.track_id == track_value:
-                return chunk
-        return None
+            by_target.setdefault(identifier.target_key, chunk)
+            by_bone.setdefault(identifier.bone_id, chunk)
+            by_track.setdefault(identifier.track_id, chunk)
+        object.__setattr__(self, "_chunks_by_target", by_target)
+        object.__setattr__(self, "_chunks_by_bone", by_bone)
+        object.__setattr__(self, "_chunks_by_track", by_track)
+
+    def find_chunk(self, bone_id: int, track_id: int | WadTrackId | None = None) -> WadChunk | None:
+        if track_id is None:
+            return self._chunks_by_bone.get(bone_id)
+        return self._chunks_by_target.get((bone_id, int(track_id)))
 
     def find_track_chunk(self, track_id: int | WadTrackId) -> WadChunk | None:
-        track_value = int(track_id)
-        return next(
-            (
-                chunk
-                for chunk in self.chunks
-                if chunk.bone_id.track_id == track_value
-            ),
-            None,
-        )
+        return self._chunks_by_track.get(int(track_id))
 
 
 @dataclass(frozen=True, slots=True)
@@ -477,6 +678,37 @@ class WadAnimation:
     tracks: tuple[WadTrack, ...]
     vft: int = field(default=0, repr=False, compare=False)
     pointer: int = field(default=0, repr=False, compare=False)
+    _skeletal_tracks: tuple[WadBoneId, ...] = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _skeletal_bone_ids: tuple[int, ...] = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _skeletal_target_keys: frozenset[tuple[int, int]] = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+
+    def __post_init__(self) -> None:
+        unique: dict[tuple[int, int], WadBoneId] = {}
+        for group in self.tracks:
+            for chunk in group.chunks:
+                identifier = chunk.bone_id
+                if identifier.is_skeletal_transform:
+                    unique.setdefault(identifier.target_key, identifier)
+        tracks = tuple(unique.values())
+        object.__setattr__(self, "_skeletal_tracks", tracks)
+        object.__setattr__(
+            self,
+            "_skeletal_bone_ids",
+            tuple(dict.fromkeys(item.bone_id for item in tracks)),
+        )
+        object.__setattr__(self, "_skeletal_target_keys", frozenset(unique))
 
     @property
     def short_name(self) -> str:
@@ -515,19 +747,11 @@ class WadAnimation:
     def skeletal_tracks(self) -> tuple[WadBoneId, ...]:
         """Logical skeletal targets, independent of per-block channel encoding."""
 
-        if not self.tracks:
-            return ()
-        unique: dict[tuple[int, int], WadBoneId] = {}
-        for group in self.tracks:
-            for chunk in group.chunks:
-                identifier = chunk.bone_id
-                if identifier.is_skeletal_transform:
-                    unique.setdefault(identifier.target_key, identifier)
-        return tuple(unique.values())
+        return self._skeletal_tracks
 
     @property
     def skeletal_bone_ids(self) -> tuple[int, ...]:
-        return tuple(dict.fromkeys(item.bone_id for item in self.skeletal_tracks))
+        return self._skeletal_bone_ids
 
     def _build_skeletal_pose(
         self,
@@ -537,7 +761,7 @@ class WadAnimation:
             tuple[float, float, float, float],
         ],
     ) -> SkeletalPose:
-        targets = {item.target_key for item in self.skeletal_tracks}
+        targets = self._skeletal_target_keys
 
         def transform(
             bone_id: int,
@@ -646,8 +870,7 @@ class WadAnimation:
     ) -> SkeletalAnimationClip:
         """Project every WAD frame into the neutral skeletal contract."""
 
-        count = max(self.frame_count, 1)
-        frames = tuple(self.skeletal_pose_at(frame) for frame in range(count))
+        frames = tuple(self.iter_skeletal_poses())
         clip = SkeletalAnimationClip(
             name=self.short_name,
             duration=max(self.duration, 0.0),
@@ -660,6 +883,12 @@ class WadAnimation:
             if skeleton is None
             else skeleton.bind_animation(clip, strict=strict)
         )
+
+    def iter_skeletal_poses(self) -> Iterator[SkeletalPose]:
+        """Yield neutral skeletal poses without retaining the complete clip."""
+
+        for frame in range(max(self.frame_count, 1)):
+            yield self.skeletal_pose_at(frame)
 
     def find_bone(
         self,
@@ -1020,6 +1249,12 @@ class _WadReader:
         packed_sequence_words: tuple[int, ...] = ()
         packed_sequence_bit_count = 0
         packed_sequence_divisor = 0
+        raw_data = b""
+        raw_code = ""
+        raw_count = 0
+        quantized_data = b""
+        quantized_element_size = 0
+        quantized_element_count = 0
 
         if channel_type == WadChannelType.STATIC_FLOAT:
             values = (self.unpack(pointer + 8, "<f", "WAD static float channel")[0],)
@@ -1032,8 +1267,20 @@ class _WadReader:
             value_pointer = self.unpack(pointer + 8, "<I", "WAD static quaternion channel")[0]
             vector = self.unpack(value_pointer, "<4f", "WAD static quaternion value")
         elif channel_type in {WadChannelType.RAW_FLOAT, WadChannelType.RAW_INT}:
-            code = "f" if channel_type == WadChannelType.RAW_FLOAT else "i"
-            values = self.plain_array(pointer + 8, code, f"WAD {channel_type.name} values")
+            raw_code = "f" if channel_type == WadChannelType.RAW_FLOAT else "i"
+            data_pointer, raw_count = self.array_header(
+                pointer + 8,
+                f"WAD {channel_type.name} values",
+            )
+            raw_data = (
+                b""
+                if raw_count == 0
+                else self.read(
+                    data_pointer,
+                    raw_count * 4,
+                    f"WAD {channel_type.name} values",
+                )
+            )
         elif channel_type == WadChannelType.QUANTIZED_FLOAT:
             data_pointer, element_size, element_count, scale, offset = self.unpack(
                 pointer + 8,
@@ -1045,21 +1292,13 @@ class _WadReader:
                     f"WAD quantized float element size exceeds 32 bits: {element_size}"
                 )
             word_count = ((element_size * element_count) + 31) >> 5
-            words = self.unpack(
+            quantized_data = self.read(
                 data_pointer,
-                f"<{word_count + 1}I",
+                (word_count + 1) * 4,
                 "WAD quantized float bits",
             )
-            mask = 0xFFFFFFFF if element_size == 32 else (1 << element_size) - 1
-            decoded: list[int] = []
-            for index in range(element_count):
-                bit_address = index * element_size
-                block = bit_address >> 5
-                bit = bit_address & 31
-                pair = words[block] | (words[block + 1] << 32)
-                decoded.append((pair >> bit) & mask)
-            quantized_values = tuple(decoded)
-            values = tuple((value * scale) + offset for value in quantized_values)
+            quantized_element_size = element_size
+            quantized_element_count = element_count
         elif channel_type == WadChannelType.RLE_INT:
             run_values = self.plain_array(pointer + 8, "i", "WAD RLE integer values")
             sequence_pointer, sequence_bits, divisor = self.unpack(
@@ -1111,6 +1350,12 @@ class _WadReader:
             packed_sequence_divisor,
             vft,
             pointer,
+            _raw_data=raw_data,
+            _raw_code=raw_code,
+            _raw_count=raw_count,
+            _quantized_data=quantized_data,
+            _quantized_element_size=quantized_element_size,
+            _quantized_element_count=quantized_element_count,
         )
         self._channels[pointer] = channel
         return channel
