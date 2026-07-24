@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import struct
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import IntEnum, IntFlag
 from pathlib import Path
 from typing import BinaryIO, Literal
 
 from ._utils import atomic_write
-from .model import ModelAsset
+from .fragment import FragmentAsset, FragmentPiece
+from .model import ModelAsset, ModelBoundingSphere, ModelCoordinateSystem
 from .rsc import RSC5_VIRTUAL_BASE, Rsc5Resource
 from .wbn import WbnBound, _WbnParser
 from .wdr import (
@@ -283,6 +284,11 @@ class WftFragmentDrawable:
     fragment_matrix_indices: tuple[int, ...]
     fragment_matrices: tuple[WdrMatrix4, ...]
     pointer: int = field(repr=False, compare=False)
+    inherited_shader_group: WdrShaderGroup | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
     @property
     def models(self) -> tuple[WdrDrawableModel, ...]:
@@ -294,7 +300,18 @@ class WftFragmentDrawable:
 
     @property
     def shader_group(self) -> WdrShaderGroup | None:
+        return self.drawable.shader_group or self.inherited_shader_group
+
+    @property
+    def serialized_shader_group(self) -> WdrShaderGroup | None:
         return self.drawable.shader_group
+
+    @property
+    def uses_inherited_shader_group(self) -> bool:
+        return (
+            self.drawable.shader_group is None
+            and self.inherited_shader_group is not None
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -589,6 +606,7 @@ class _WftReader:
         self.bound_parser = _WbnParser(resource.virtual_data)
         self.drawables: dict[int, WftFragmentDrawable] = {}
         self.archetypes: dict[int, WftPhysicsArchetype] = {}
+        self.common_shader_group: WdrShaderGroup | None = None
 
     def read(self, pointer: int, size: int, label: str) -> bytes:
         return self.drawable_reader.read(pointer, size, label)
@@ -654,7 +672,13 @@ class _WftReader:
             indices,
             matrices,
             pointer,
+            self.common_shader_group,
         )
+        if result.uses_inherited_shader_group:
+            assert result.shader_group is not None
+            for geometry in result.geometries:
+                if geometry.shader_index < len(result.shader_group.shaders):
+                    geometry.shader = result.shader_group.shaders[geometry.shader_index]
         self.drawables[pointer] = result
         return result
 
@@ -815,10 +839,17 @@ class _WftReader:
             () if self_collision_count == 0
             else tuple(self.read(collision_second_pointer, self_collision_count, "WFT second self-collision indices"))
         )
+        drawable = self.parse_drawable(drawable_pointer)
+        self.common_shader_group = (
+            None if drawable is None else drawable.serialized_shader_group
+        )
+        extra_drawables = tuple(
+            self.parse_drawable(pointer) for pointer in extra_pointers
+        )
         return WftFragment(
             self.string(name_pointer), smallest, largest, bounding_sphere, root_offset,
-            original_offset, unbroken_offset, damping, self.parse_drawable(drawable_pointer),
-            tuple(self.parse_drawable(pointer) for pointer in extra_pointers), extra_names,
+            original_offset, unbroken_offset, damping, drawable,
+            extra_drawables, extra_names,
             damaged_index, root_child_index, groups, children,
             self.parse_archetype(archetype_pointer),
             self.parse_archetype(damaged_archetype_pointer), self._bound(bound_pointer),
@@ -896,13 +927,133 @@ class WftDocument:
     def iter_drawables(self) -> Iterator[WftFragmentDrawable]:
         yield from self.fragment.iter_drawables()
 
+    def _project_drawable(
+        self,
+        drawable: WftFragmentDrawable,
+        *,
+        name: str,
+    ) -> ModelAsset:
+        source = drawable.drawable
+        effective_group = drawable.shader_group
+        if source.shader_group is not effective_group:
+            source = replace(source, shader_group=effective_group)
+        document = WdrDocument(source, self.resource, name, self.source_path)
+        return document.to_model()
+
     def to_model(self) -> ModelAsset:
         """Project the common drawable into FourFury's target-independent model contract."""
 
         if self.drawable is None:
             raise ValueError("WFT fragment has no common drawable")
-        document = WdrDocument(self.drawable.drawable, self.resource, self.name, self.source_path)
-        return document.to_model()
+        return self._project_drawable(self.drawable, name=self.name)
+
+    def to_fragment(self) -> FragmentAsset:
+        """Project every visual state and physical piece into a neutral fragment."""
+
+        fragment = self.fragment
+        stem = Path(self.name).stem
+        models_by_pointer: dict[int, ModelAsset] = {}
+
+        def project(
+            drawable: WftFragmentDrawable | None,
+            fallback_name: str,
+        ) -> ModelAsset | None:
+            if drawable is None:
+                return None
+            cached = models_by_pointer.get(drawable.pointer)
+            if cached is not None:
+                return cached
+            model = self._project_drawable(
+                drawable,
+                name=drawable.name or fallback_name,
+            )
+            models_by_pointer[drawable.pointer] = model
+            return model
+
+        common_model = project(fragment.drawable, stem)
+        pieces = []
+        for index, child in enumerate(fragment.children):
+            group_name = (
+                child.group.name
+                if child.group is not None and child.group.name
+                else f"piece_{index}"
+            )
+            inertia = (
+                None
+                if index >= len(fragment.child_inertia)
+                else tuple(fragment.child_inertia[index])
+            )
+            damaged_inertia = (
+                None
+                if index >= len(fragment.damaged_child_inertia)
+                else tuple(fragment.damaged_child_inertia[index])
+            )
+            physics_transform = (
+                None
+                if index >= len(fragment.child_matrices)
+                else fragment.child_matrices[index].values
+            )
+            pieces.append(FragmentPiece(
+                index=index,
+                name=group_name,
+                group_index=child.group_index,
+                bone_index=child.bone_index,
+                flags=int(child.flags),
+                undamaged_mass=child.undamaged_mass,
+                damaged_mass=child.damaged_mass,
+                bone_attachment=child.bone_attachment.values,
+                link_attachment=child.link_attachment.values,
+                physics_transform=physics_transform,
+                inertia=inertia,
+                damaged_inertia=damaged_inertia,
+                undamaged_model=project(
+                    child.undamaged_drawable,
+                    f"{stem}_{group_name}_undamaged",
+                ),
+                damaged_model=project(
+                    child.damaged_drawable,
+                    f"{stem}_{group_name}_damaged",
+                ),
+            ))
+
+        coordinate_system = (
+            ModelCoordinateSystem()
+            if common_model is None
+            else common_model.coordinate_system
+        )
+        return FragmentAsset(
+            name=stem,
+            common_model=common_model,
+            pieces=tuple(pieces),
+            flags=int(fragment.flags),
+            root_child_index=fragment.root_child_index,
+            model_index=fragment.model_index,
+            bounding_sphere=ModelBoundingSphere(
+                center=(
+                    fragment.bounding_sphere.x,
+                    fragment.bounding_sphere.y,
+                    fragment.bounding_sphere.z,
+                ),
+                radius=fragment.bounding_sphere.w,
+            ),
+            root_center_of_gravity_offset=tuple(
+                fragment.root_center_of_gravity_offset
+            ),
+            original_root_center_of_gravity_offset=tuple(
+                fragment.original_root_center_of_gravity_offset
+            ),
+            unbroken_center_of_gravity_offset=tuple(
+                fragment.unbroken_center_of_gravity_offset
+            ),
+            damping=tuple(tuple(value) for value in fragment.damping),
+            source_path=self.source_path,
+            coordinate_system=coordinate_system,
+        )
+
+    def to_models(self) -> tuple[ModelAsset, ...]:
+        """Return every unique drawable model used by the neutral fragment."""
+
+        return self.to_fragment().models
 
     def to_bytes(self) -> bytes:
         """Return the original lossless RSC5 resource."""

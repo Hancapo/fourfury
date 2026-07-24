@@ -24,6 +24,7 @@ from .animation import (
     normalize_quaternion,
 )
 from .crypto import GTAIVCrypto, GTAIV_AES_KEY, GTAIV_KEY_SHA1, extract_aes_key
+from .fragment import FragmentAsset, FragmentMatrix3x4, FragmentPiece
 from .gtxd import (
     GTXD_SECTION,
     GtxdDependency,
@@ -389,6 +390,7 @@ __version__ = "0.2.0"
 __all__ = [
     "AnimationScalar", "AnimationTrackFrame", "AnimationTrackInterpolation",
     "AnimationTrackTarget", "AnimationTrackValue", "AnimationValue",
+    "FragmentAsset", "FragmentMatrix3x4", "FragmentPiece",
     "GTAIVCrypto", "GTAIV_AES_KEY", "GTAIV_KEY_SHA1", "GTXD_SECTION", "GtxdDependency",
     "GtxdDocument", "GtxdHierarchy", "IMG3_ENTRY_SIZE", "IMG3_MAGIC",
     "IMG3_VERSION", "IDE_ARCHETYPE_SECTIONS", "IdeArchetype", "IdeArchetypeFlags",

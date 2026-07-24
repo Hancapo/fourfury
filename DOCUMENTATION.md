@@ -718,9 +718,31 @@ if fragment.fragment.flags & WftFragmentFlags.HAS_ARTICULATED_PARTS:
 for drawable in fragment.iter_drawables():
     print(drawable.name, len(drawable.geometries), drawable.bound)
 
-# The common drawable uses the same target-independent contract as WDR.
+# The compatibility API still projects only the common drawable.
 model = fragment.to_model()
+
+# The fragment API retains every breakable piece and visual state.
+asset = fragment.to_fragment()
+for piece in asset.pieces:
+    print(piece.name, piece.group_index, piece.bone_index)
+    print(piece.undamaged_model, piece.damaged_model)
+    print(piece.bone_attachment, piece.physics_transform)
+
+# Unique common, undamaged, and damaged models are also available directly.
+models = fragment.to_models()
 ```
+
+`to_fragment()` returns a target-independent `FragmentAsset`. Its
+`FragmentPiece` records retain group and bone bindings, undamaged and damaged
+models, masses, inertia, attachment matrices, and physics transforms. Reused
+drawable pointers resolve to the same immutable `ModelAsset`, so converters can
+preserve instancing. `to_data()` provides primitive fragment metadata without
+introducing a target-game or renderer dependency.
+
+Child drawables without their own shader group inherit the common drawable's
+materials, matching GTA IV's fragment loading behavior. The serialized absence
+remains visible through `serialized_shader_group`, while `shader_group` exposes
+the effective group and `uses_inherited_shader_group` identifies the fallback.
 
 Child drawables are decoded on first access. Reading fragment groups, masses,
 inertia, and attachment matrices therefore does not materialize every drawable
