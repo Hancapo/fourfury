@@ -364,6 +364,25 @@ duration, signature, and project flags. `WadBoneId.track_name` handles the
 action-flags bit explicitly, while `bone_name` resolves the stock character,
 facial, and vehicle IDs known to GTA IV.
 
+`WadAnimation.targets` is the complete logical target set across all serialized
+chunk groups. Unlike the compatibility `bone_ids` property, it is not limited
+to the first group. `evaluate_tracks(frame)` and `sample_tracks(time)` return
+values keyed by `(target_id, track_id)` and preserve scalar integers instead of
+coercing every channel to a four-component float vector. Use `track_ids=` to
+select only the tracks needed by a converter:
+
+```python
+values = animation.sample_tracks(
+    0.5,
+    track_ids=(WadTrackId.BONE_TRANSLATION, WadTrackId.BONE_ROTATION),
+)
+```
+
+`iter_frames()` streams format-neutral `AnimationTrackFrame` objects.
+`to_track_animation()` returns a `TrackAnimationClip` with explicit targets and
+step, linear, or quaternion interpolation. Both the WAD animation and neutral
+clip provide `to_data()` for consumers that only accept primitive Python data.
+
 UV targets use the RAGE `TypeId == 0xFF` sentinel. `WadBoneId.is_uv_channel`,
 `uv_index`, and `type_name` expose that identity without misclassifying it as an
 integer track. `bind_uv(index)` can retarget an existing track using the same

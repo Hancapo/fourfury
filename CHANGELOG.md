@@ -9,6 +9,7 @@ The changelog is release-oriented and uses a small fixed set of categories:
 
 ### Added
 - WAD animation dictionary reading with named track metadata, decoded channels, hash lookup, and frame sampling.
+- Format-neutral arbitrary WAD tracks, sparse frames, interpolation, and primitive-data export.
 - Target-independent UV animation clips, affine transforms, sampling, and primitive-data export.
 - Target-independent skeletal poses and clips with explicit mover/root-motion tracks.
 - Optional skeletal-animation binding with hierarchy, skeleton signatures, and bind-pose matrices.

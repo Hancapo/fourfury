@@ -3,10 +3,15 @@ from __future__ import annotations
 import unittest
 
 from fourfury import (
+    AnimationTrackFrame,
+    AnimationTrackInterpolation,
+    AnimationTrackTarget,
+    AnimationTrackValue,
     SkeletalAnimationClip,
     SkeletalBonePose,
     SkeletalPose,
     SkeletalTransform,
+    TrackAnimationClip,
     UvAnimationClip,
     UvAnimationFrame,
     UvTransform,
@@ -63,6 +68,65 @@ class QuaternionTests(unittest.TestCase):
             ),
             (0.0, 0.0, 0.0, 1.0),
         )
+
+
+class TrackAnimationTests(unittest.TestCase):
+    def test_interpolates_arbitrary_tracks_by_declared_policy(self) -> None:
+        position = AnimationTrackTarget(
+            1,
+            0,
+            3,
+            AnimationTrackInterpolation.LINEAR,
+            "root",
+            "position",
+        )
+        state = AnimationTrackTarget(
+            0,
+            128,
+            1,
+            AnimationTrackInterpolation.STEP,
+            track_name="action_flags",
+        )
+        first = AnimationTrackFrame(
+            0.0,
+            (
+                AnimationTrackValue(position, (0.0, 0.0, 0.0)),
+                AnimationTrackValue(state, 4),
+            ),
+        )
+        last = AnimationTrackFrame(
+            1.0,
+            (
+                AnimationTrackValue(position, (2.0, 4.0, 6.0)),
+                AnimationTrackValue(state, 8),
+            ),
+        )
+        clip = TrackAnimationClip(
+            "generic",
+            1.0,
+            False,
+            (position, state),
+            (first, last),
+            0x1234,
+        )
+
+        middle = clip.sample(0.5)
+
+        self.assertEqual(middle.get(1, 0).value, (1.0, 2.0, 3.0))  # type: ignore[union-attr]
+        self.assertEqual(middle.get(0, 128).value, 4)  # type: ignore[union-attr]
+        self.assertIs(clip.get_target(1, 0), position)
+        self.assertEqual(clip.to_data()["signature"], 0x1234)
+
+    def test_rejects_incompatible_track_values(self) -> None:
+        target = AnimationTrackTarget(
+            1,
+            0,
+            3,
+            AnimationTrackInterpolation.LINEAR,
+        )
+
+        with self.assertRaisesRegex(ValueError, "expects 3 components"):
+            AnimationTrackValue(target, (1.0, 2.0))
 
 
 class SkeletalAnimationTests(unittest.TestCase):

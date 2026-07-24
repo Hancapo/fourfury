@@ -1,4 +1,10 @@
 from .animation import (
+    AnimationScalar,
+    AnimationTrackFrame,
+    AnimationTrackInterpolation,
+    AnimationTrackTarget,
+    AnimationTrackValue,
+    AnimationValue,
     Quaternion,
     SkeletalAnimationClip,
     SkeletalBonePose,
@@ -6,6 +12,7 @@ from .animation import (
     SkeletalMatrix4,
     SkeletalPose,
     SkeletalTransform,
+    TrackAnimationClip,
     UvAnimationClip,
     UvAnimationFrame,
     UvMatrix3,
@@ -328,6 +335,8 @@ from .wpl_lod import (
 __version__ = "0.1.0"
 
 __all__ = [
+    "AnimationScalar", "AnimationTrackFrame", "AnimationTrackInterpolation",
+    "AnimationTrackTarget", "AnimationTrackValue", "AnimationValue",
     "GTAIVCrypto", "GTAIV_AES_KEY", "GTAIV_KEY_SHA1", "GTXD_SECTION", "GtxdDependency",
     "GtxdDocument", "GtxdHierarchy", "IMG3_ENTRY_SIZE", "IMG3_MAGIC",
     "IMG3_VERSION", "IDE_ARCHETYPE_SECTIONS", "IdeArchetype", "IdeArchetypeFlags",
@@ -354,7 +363,7 @@ __all__ = [
     "Rsc5TextureDictionary", "Rsc5TextureFormat", "WBN_BOUND_SIZE",
     "SkeletalAnimationClip", "SkeletalBonePose", "SkeletalBoneTarget",
     "SkeletalMatrix4", "SkeletalPose",
-    "SkeletalTransform",
+    "SkeletalTransform", "TrackAnimationClip",
     "UvAnimationClip", "UvAnimationFrame", "UvMatrix3", "UvTransform", "UvVector2",
     "UvVector4", "Vector3",
     "WAD_ANIMATION_SIZE", "WAD_BONE_TRANSFORM_TRACKS", "WAD_CHANNEL_HEADER_SIZE",
