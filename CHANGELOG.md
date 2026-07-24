@@ -10,6 +10,7 @@ The changelog is release-oriented and uses a small fixed set of categories:
 ### Added
 - WAD animation dictionary reading with named track metadata, decoded channels, hash lookup, and frame sampling.
 - Format-neutral arbitrary WAD tracks, sparse frames, interpolation, and primitive-data export.
+- Structured WAD track classification, validation diagnostics, and dictionary audit reports.
 - Target-independent UV animation clips, affine transforms, sampling, and primitive-data export.
 - Target-independent skeletal poses and clips with explicit mover/root-motion tracks.
 - Optional skeletal-animation binding with hierarchy, skeleton signatures, and bind-pose matrices.
@@ -18,6 +19,8 @@ The changelog is release-oriented and uses a small fixed set of categories:
 - Typed IDE archetype animation flags and neutral WDR default UV transforms.
 
 ### Fixed
+- WAD track-group sampling respects the shared boundary frame between adjacent groups.
+- Stock UV-animation dictionary hashes resolve through their base-name and material-slot convention.
 - WAD UV targets are identified explicitly instead of being reported as integer tracks.
 - WAD skeletal targets remain stable when their per-chunk encoding changes, and sampled quaternions now use normalized shortest-path interpolation.
 - WAD action-flags tracks are no longer misclassified as bone translations.

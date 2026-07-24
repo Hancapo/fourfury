@@ -383,12 +383,37 @@ values = animation.sample_tracks(
 step, linear, or quaternion interpolation. Both the WAD animation and neutral
 clip provide `to_data()` for consumers that only accept primitive Python data.
 
+`WadAnimation.kinds` classifies known tracks into stable semantic families:
+skeletal, material, morph, camera, light, generic, action, and custom. The
+corresponding `has_*_tracks` properties support simple filtering without
+requiring consumers to duplicate numeric track tables. Unclassified numeric
+IDs remain `custom`; FourFury does not assign speculative names to them.
+
+`validate()` returns structured `WadValidationIssue` objects instead of raising
+for semantic inconsistencies. Passing a `ModelSkeleton` additionally checks its
+signature and animated bone coverage. `WadDocument.audit()` produces aggregate
+animation, group, target, track-kind, track-ID, and channel-type counts together
+with all validation issues:
+
+```python
+report = wad.audit()
+print(report.is_valid, report.custom_track_ids)
+portable_report = report.to_data()
+```
+
+Adjacent serialized track groups overlap by one sample. `frames_per_group` is
+the decoded group capacity and `frame_group_stride` is the distance to the next
+group; frame evaluation accounts for that overlap, including the final sample.
+
 UV targets use the RAGE `TypeId == 0xFF` sentinel. `WadBoneId.is_uv_channel`,
 `uv_index`, and `type_name` expose that identity without misclassifying it as an
 integer track. `bind_uv(index)` can retarget an existing track using the same
 representation used by the runtime. Animations named with the established
 `name_uv_<material-index>` convention expose `is_uv_animation`,
 `uv_material_index`, and `uv_base_name`.
+Their stock dictionary key is `JOAAT(base_name) + material_index + 1`;
+`wad_animation_hash()` and normal `WadDocument` lookup handle this convention
+while retaining compatibility with dictionaries hashed from the complete name.
 
 Skeletal targets use `WadBoneId.target_key` to identify the logical
 `(bone_id, track_id)` independently from the channel encoding stored in each
