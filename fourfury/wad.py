@@ -34,6 +34,15 @@ from .rsc import (
     rsc5_pointer_offset,
 )
 from .wbd import joaat
+from .wad_audit import (
+    WadAuditReport,
+    WadTrackKind,
+    WadValidationIssue,
+    audit_wad_document,
+    classify_wad_track,
+    validate_wad_animation,
+    validate_wad_document,
+)
 
 
 WAD_RESOURCE_VERSION = 1
@@ -43,6 +52,27 @@ WAD_TRACK_SIZE = 0x10
 WAD_CHUNK_SIZE = 0x18
 WAD_CHANNEL_HEADER_SIZE = 0x08
 _WAD_UV_ANIMATION_NAME = re.compile(r"^(?P<name>.+)_uv_(?P<material>\d+)$", re.IGNORECASE)
+
+
+def _wad_short_name(value: str) -> str:
+    name = value.replace("\\", "/").rsplit("/", 1)[-1]
+    return name[:-5] if name.casefold().endswith(".anim") else name
+
+
+def wad_animation_hash(value: str | bytes) -> int:
+    """Return the stock dictionary hash for an animation name."""
+
+    text = (
+        value.decode("utf-8", errors="replace")
+        if isinstance(value, bytes)
+        else value
+    )
+    short_name = _wad_short_name(text)
+    match = _WAD_UV_ANIMATION_NAME.fullmatch(short_name)
+    if match is None:
+        return joaat(short_name)
+    base_hash = joaat(match.group("name"))
+    return (base_hash + int(match.group("material")) + 1) & 0xFFFFFFFF
 
 
 class WadAnimationFlags(IntFlag):
@@ -793,8 +823,7 @@ class WadAnimation:
 
     @property
     def short_name(self) -> str:
-        name = self.name.replace("\\", "/").rsplit("/", 1)[-1]
-        return name[:-5] if name.casefold().endswith(".anim") else name
+        return _wad_short_name(self.name)
 
     @property
     def uv_material_index(self) -> int | None:
@@ -821,6 +850,25 @@ class WadAnimation:
         return (self.frame_count - 1) / self.duration
 
     @property
+    def frames_per_group(self) -> int:
+        """Decoded sample count covered by a full serialized track group."""
+
+        if self.frames_per_chunk > 0:
+            # Adjacent groups share their boundary sample. The animation field
+            # is the stride, while a full group contains one extra sample.
+            return self.frames_per_chunk + 1
+        return 0 if not self.tracks else self.tracks[0].frames_per_chunk
+
+    @property
+    def frame_group_stride(self) -> int:
+        """Frame distance between adjacent overlapping track groups."""
+
+        if self.frames_per_chunk > 0:
+            return self.frames_per_chunk
+        frames_per_group = self.frames_per_group
+        return max(frames_per_group - 1, 1) if frames_per_group else 0
+
+    @property
     def bone_ids(self) -> tuple[WadBoneId, ...]:
         """Compatibility view of the first serialized track group."""
 
@@ -832,10 +880,63 @@ class WadAnimation:
 
         return self._targets
 
+    @property
+    def kinds(self) -> tuple[WadTrackKind, ...]:
+        """Semantic track families present in this animation."""
+
+        present = {
+            classify_wad_track(target.track_id)
+            for target in self.targets
+        }
+        return tuple(kind for kind in WadTrackKind if kind in present)
+
+    def _has_kind(self, kind: WadTrackKind) -> bool:
+        return any(
+            classify_wad_track(target.track_id) is kind
+            for target in self.targets
+        )
+
+    @property
+    def has_skeletal_tracks(self) -> bool:
+        return self._has_kind(WadTrackKind.SKELETAL)
+
+    @property
+    def has_material_tracks(self) -> bool:
+        return self._has_kind(WadTrackKind.MATERIAL)
+
+    @property
+    def has_morph_tracks(self) -> bool:
+        return self._has_kind(WadTrackKind.MORPH)
+
+    @property
+    def has_camera_tracks(self) -> bool:
+        return self._has_kind(WadTrackKind.CAMERA)
+
+    @property
+    def has_light_tracks(self) -> bool:
+        return self._has_kind(WadTrackKind.LIGHT)
+
+    @property
+    def has_action_tracks(self) -> bool:
+        return self._has_kind(WadTrackKind.ACTION)
+
+    @property
+    def has_custom_tracks(self) -> bool:
+        return self._has_kind(WadTrackKind.CUSTOM)
+
     def iter_tracks(self) -> Iterator[AnimationTrackTarget]:
         """Iterate logical tracks independently from per-block channel encoding."""
 
         return iter(self.targets)
+
+    def validate(
+        self,
+        *,
+        skeleton: ModelSkeleton | None = None,
+    ) -> tuple[WadValidationIssue, ...]:
+        """Return structured diagnostics without mutating the animation."""
+
+        return validate_wad_animation(self, skeleton=skeleton)
 
     @property
     def skeletal_tracks(self) -> tuple[WadBoneId, ...]:
@@ -1006,15 +1107,15 @@ class WadAnimation:
             raise ValueError("WAD animation frame cannot be negative")
         if self.frame_count:
             frame = min(frame, self.frame_count - 1)
-        frames_per_chunk = self.frames_per_chunk or self.tracks[0].frames_per_chunk
-        if frames_per_chunk <= 0:
+        group_stride = self.frame_group_stride
+        if group_stride <= 0:
             raise ValueError("WAD animation has no valid frames-per-chunk value")
-        group_index = min(frame // frames_per_chunk, len(self.tracks) - 1)
+        group_index = min(frame // group_stride, len(self.tracks) - 1)
         chunk = self.tracks[group_index].find_chunk(bone_id, track_id)
         if chunk is None:
             suffix = "" if track_id is None else f" on track {int(track_id)}"
             raise KeyError(f"WAD animation has no bone {bone_id}{suffix}")
-        return chunk.vector_at(frame % frames_per_chunk)
+        return chunk.vector_at(frame - (group_index * group_stride))
 
     evaluate_frame = vector_at
 
@@ -1025,11 +1126,14 @@ class WadAnimation:
             raise ValueError("WAD animation frame cannot be negative")
         if self.frame_count:
             frame = min(frame, self.frame_count - 1)
-        frames_per_chunk = self.frames_per_chunk or self.tracks[0].frames_per_chunk
-        if frames_per_chunk <= 0:
+        group_stride = self.frame_group_stride
+        if group_stride <= 0:
             raise ValueError("WAD animation has no valid frames-per-chunk value")
-        group_index = min(frame // frames_per_chunk, len(self.tracks) - 1)
-        return self.tracks[group_index], frame % frames_per_chunk
+        group_index = min(frame // group_stride, len(self.tracks) - 1)
+        return (
+            self.tracks[group_index],
+            frame - (group_index * group_stride),
+        )
 
     @staticmethod
     def _track_filter(
@@ -1231,12 +1335,12 @@ class WadAnimation:
             raise ValueError("WAD animation frame cannot be negative")
         if self.frame_count:
             frame = min(frame, self.frame_count - 1)
-        frames_per_chunk = self.frames_per_chunk or self.tracks[0].frames_per_chunk
-        if frames_per_chunk <= 0:
+        group_stride = self.frame_group_stride
+        if group_stride <= 0:
             raise ValueError("WAD animation has no valid frames-per-chunk value")
-        group_index = min(frame // frames_per_chunk, len(self.tracks) - 1)
+        group_index = min(frame // group_stride, len(self.tracks) - 1)
         group = self.tracks[group_index]
-        local_frame = frame % frames_per_chunk
+        local_frame = frame - (group_index * group_stride)
         row_u_chunk = group.find_track_chunk(WadTrackId.SHADER_SLIDE_U)
         row_v_chunk = group.find_track_chunk(WadTrackId.SHADER_SLIDE_V)
         if row_u_chunk is None and row_v_chunk is None:
@@ -1364,21 +1468,46 @@ class WadDocument:
 
     def find_entry(self, name_or_hash: str | bytes | int) -> WadEntry | None:
         if isinstance(name_or_hash, int):
-            target = name_or_hash
+            return self._entries_by_hash.get(name_or_hash)
+        if isinstance(name_or_hash, bytes):
+            value = name_or_hash.decode("utf-8", errors="replace")
         else:
-            if isinstance(name_or_hash, bytes):
-                value = name_or_hash.decode("utf-8", errors="replace")
-            else:
-                value = name_or_hash
-            value = value.replace("\\", "/").rsplit("/", 1)[-1]
-            if value.casefold().endswith(".anim"):
-                value = value[:-5]
-            target = joaat(value)
-        return self._entries_by_hash.get(target)
+            value = name_or_hash
+        short_name = _wad_short_name(value)
+        candidates = (
+            wad_animation_hash(short_name),
+            joaat(short_name),
+        )
+        return next(
+            (
+                entry
+                for candidate in dict.fromkeys(candidates)
+                if (entry := self._entries_by_hash.get(candidate)) is not None
+            ),
+            None,
+        )
 
     def find_animation(self, name_or_hash: str | bytes | int) -> WadAnimation | None:
         entry = self.find_entry(name_or_hash)
         return None if entry is None else entry.animation
+
+    def validate(
+        self,
+        *,
+        skeleton: ModelSkeleton | None = None,
+    ) -> tuple[WadValidationIssue, ...]:
+        """Return structured dictionary and animation diagnostics."""
+
+        return validate_wad_document(self, skeleton=skeleton)
+
+    def audit(
+        self,
+        *,
+        skeleton: ModelSkeleton | None = None,
+    ) -> WadAuditReport:
+        """Summarize structures, semantic track families, and validation issues."""
+
+        return audit_wad_document(self, skeleton=skeleton)
 
     def to_bytes(self) -> bytes:
         """Return the original lossless RSC5 resource."""
@@ -1693,4 +1822,5 @@ __all__ = [
     "WadTrackPacking",
     "WadTrackType",
     "load_wad",
+    "wad_animation_hash",
 ]
