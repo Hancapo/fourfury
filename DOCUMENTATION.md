@@ -722,11 +722,16 @@ for drawable in fragment.iter_drawables():
 model = fragment.to_model()
 ```
 
-`WftFragmentFlags`, `WftGroupFlags`, and `WftChildFlags` expose the known RAGE
-meanings instead of anonymous bytes. `WftDampingKind` addresses all six damping
-vectors by their linear/angular and constant/velocity behavior. Child event
-references are named by collision, break, and break-from-root role while their
-opaque event payloads remain pointer values.
+`WftFragmentFlags`, `WftGroupFlags`, and `WftChildFlags` preserve the named RAGE
+meanings without presenting later-engine equivalences as proven GTA IV behavior.
+Each fragment, group, and child exposes `flag_info` entries with `verified`,
+`inferred`, or `unresolved` confidence, plus `unresolved_flags` for unnamed bits.
+The standalone `explain_fragment_flags()`, `explain_group_flags()`, and
+`explain_child_flags()` helpers provide the same structured descriptions.
+`WftDampingKind` addresses all six damping vectors by their linear/angular and
+constant/velocity behavior. Child event references are named by collision,
+break, and break-from-root role while their opaque event payloads remain pointer
+values.
 
 The WFT semantic view is read-only. `to_bytes()` and `save()` preserve the complete
 original RSC5 resource, including fields that are not part of the public semantic
