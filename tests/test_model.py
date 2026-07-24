@@ -8,6 +8,10 @@ from fourfury import (
     ModelParameterKind,
     ModelTextureFormat,
     ModelTextureKind,
+    SkeletalAnimationClip,
+    SkeletalBonePose,
+    SkeletalPose,
+    SkeletalTransform,
     WdrDocument,
 )
 
@@ -99,6 +103,87 @@ class ModelProjectionTests(unittest.TestCase):
         self.assertTrue(high.objects[0].is_skinned)  # type: ignore[union-attr]
         self.assertEqual(high.objects[0].bone_count, 2)  # type: ignore[union-attr]
         self.assertEqual(high.objects[0].flags, 4)  # type: ignore[union-attr]
+
+    def test_binds_neutral_animation_to_skeleton_hierarchy_and_bind_pose(self) -> None:
+        skeleton = WdrDocument.from_bytes(
+            _sample_wdr_with_skeleton()
+        ).to_model().skeleton
+        assert skeleton is not None
+        pose = SkeletalPose(
+            0.0,
+            tuple(
+                SkeletalBonePose(
+                    bone.id,
+                    SkeletalTransform(rotation=(0.0, 0.0, 0.0, 1.0)),
+                )
+                for bone in skeleton.bones
+            ),
+        )
+        clip = SkeletalAnimationClip(
+            "idle",
+            0.0,
+            False,
+            (pose,),
+            skeleton.signature,
+        )
+
+        bound = skeleton.bind_animation(clip)
+
+        self.assertTrue(bound.is_bound)
+        self.assertEqual(bound.unbound_bone_ids, ())
+        child = bound.get_target(40000)
+        assert child is not None
+        self.assertEqual(child.name, "child")
+        self.assertEqual(child.bone_index, 1)
+        self.assertEqual(child.parent_index, 0)
+        self.assertEqual(child.world_transform[12:15], (1.0, 2.0, 0.0))  # type: ignore[index]
+        self.assertEqual(
+            child.inverse_bind_transform[12:15],  # type: ignore[index]
+            (-1.0, -2.0, 0.0),
+        )
+        self.assertEqual(
+            bound.to_data()["targets"][1]["name"],  # type: ignore[index]
+            "child",
+        )
+
+    def test_skeleton_binding_validates_signature_and_missing_bones(self) -> None:
+        skeleton = WdrDocument.from_bytes(
+            _sample_wdr_with_skeleton()
+        ).to_model().skeleton
+        assert skeleton is not None
+        pose = SkeletalPose(
+            0.0,
+            (
+                SkeletalBonePose(
+                    65535,
+                    SkeletalTransform(translation=(0.0, 0.0, 0.0)),
+                ),
+            ),
+        )
+        wrong_signature = SkeletalAnimationClip(
+            "missing",
+            0.0,
+            False,
+            (pose,),
+            0x12345678,
+        )
+
+        with self.assertRaisesRegex(ValueError, "signature"):
+            skeleton.bind_animation(wrong_signature)
+
+        unbound = skeleton.bind_animation(wrong_signature, strict=False)
+        self.assertFalse(unbound.is_bound)
+        self.assertEqual(unbound.unbound_bone_ids, (65535,))
+
+        matching_signature = SkeletalAnimationClip(
+            "missing",
+            0.0,
+            False,
+            (pose,),
+            skeleton.signature,
+        )
+        with self.assertRaisesRegex(KeyError, "65535"):
+            skeleton.bind_animation(matching_signature)
 
 
 if __name__ == "__main__":

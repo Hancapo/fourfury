@@ -5,6 +5,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Iterator, TypeAlias
 
+from .animation import SkeletalAnimationClip, SkeletalBoneTarget
+
 
 ModelVector2: TypeAlias = tuple[float, float]
 ModelVector3: TypeAlias = tuple[float, float, float]
@@ -287,6 +289,48 @@ class ModelSkeleton:
     @property
     def roots(self) -> tuple[ModelBone, ...]:
         return tuple(bone for bone in self.bones if bone.parent_index is None)
+
+    def bind_animation(
+        self,
+        clip: SkeletalAnimationClip,
+        *,
+        strict: bool = True,
+    ) -> SkeletalAnimationClip:
+        """Attach hierarchy and bind-pose metadata to a neutral animation clip."""
+
+        if (
+            strict
+            and clip.signature
+            and self.signature
+            and clip.signature != self.signature
+        ):
+            raise ValueError(
+                "skeletal animation signature does not match the model skeleton"
+            )
+
+        targets: list[SkeletalBoneTarget] = []
+        missing: list[int] = []
+        for bone_id in clip.bone_ids:
+            bone = self.get_bone(bone_id)
+            if bone is None:
+                missing.append(bone_id)
+                targets.append(SkeletalBoneTarget(bone_id))
+                continue
+            targets.append(
+                SkeletalBoneTarget(
+                    bone_id=bone.id,
+                    bone_index=bone.index,
+                    name=bone.name,
+                    parent_index=bone.parent_index,
+                    local_transform=bone.local_transform,
+                    world_transform=bone.world_transform,
+                    inverse_bind_transform=bone.inverse_bind_transform,
+                )
+            )
+        if strict and missing:
+            missing_text = ", ".join(str(bone_id) for bone_id in missing)
+            raise KeyError(f"model skeleton is missing animated bone IDs: {missing_text}")
+        return clip.with_targets(tuple(targets))
 
 
 @dataclass(frozen=True, slots=True)

@@ -9,6 +9,24 @@ UvVector2: TypeAlias = tuple[float, float]
 UvVector4: TypeAlias = tuple[float, float, float, float]
 Vector3: TypeAlias = tuple[float, float, float]
 Quaternion: TypeAlias = tuple[float, float, float, float]
+SkeletalMatrix4: TypeAlias = tuple[
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+]
 UvMatrix3: TypeAlias = tuple[
     float,
     float,
@@ -219,6 +237,45 @@ class SkeletalPose:
 
 
 @dataclass(frozen=True, slots=True)
+class SkeletalBoneTarget:
+    """Skeleton metadata bound to an animated bone ID."""
+
+    bone_id: int
+    bone_index: int | None = None
+    name: str | None = None
+    parent_index: int | None = None
+    local_transform: SkeletalMatrix4 | None = None
+    world_transform: SkeletalMatrix4 | None = None
+    inverse_bind_transform: SkeletalMatrix4 | None = None
+
+    def __post_init__(self) -> None:
+        if self.bone_id < 0:
+            raise ValueError("skeletal target bone ID cannot be negative")
+        if self.bone_index is not None and self.bone_index < 0:
+            raise ValueError("skeletal target bone index cannot be negative")
+        if self.parent_index is not None and self.parent_index < 0:
+            raise ValueError("skeletal target parent index cannot be negative")
+
+    @property
+    def is_bound(self) -> bool:
+        return self.bone_index is not None
+
+    def to_data(self) -> dict[str, object]:
+        def matrix(value: SkeletalMatrix4 | None) -> list[float] | None:
+            return None if value is None else list(value)
+
+        return {
+            "bone_id": self.bone_id,
+            "bone_index": self.bone_index,
+            "name": self.name,
+            "parent_index": self.parent_index,
+            "local_transform": matrix(self.local_transform),
+            "world_transform": matrix(self.world_transform),
+            "inverse_bind_transform": matrix(self.inverse_bind_transform),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class SkeletalAnimationClip:
     """Format-neutral sampled skeletal animation for converters and tooling."""
 
@@ -227,6 +284,7 @@ class SkeletalAnimationClip:
     looping: bool
     frames: tuple[SkeletalPose, ...]
     signature: int = 0
+    targets: tuple[SkeletalBoneTarget, ...] = ()
 
     def __post_init__(self) -> None:
         if self.duration < 0.0:
@@ -243,6 +301,12 @@ class SkeletalAnimationClip:
             previous = frame.time
         if self.frames[-1].time > self.duration:
             raise ValueError("skeletal animation frame time exceeds its duration")
+        if self.targets:
+            target_ids = tuple(target.bone_id for target in self.targets)
+            if target_ids != bone_ids:
+                raise ValueError(
+                    "skeletal animation targets do not match its ordered bones"
+                )
 
     @property
     def frame_count(self) -> int:
@@ -251,6 +315,38 @@ class SkeletalAnimationClip:
     @property
     def bone_ids(self) -> tuple[int, ...]:
         return self.frames[0].bone_ids
+
+    @property
+    def is_bound(self) -> bool:
+        return bool(self.targets) and all(target.is_bound for target in self.targets)
+
+    @property
+    def unbound_bone_ids(self) -> tuple[int, ...]:
+        if not self.targets:
+            return self.bone_ids
+        return tuple(
+            target.bone_id for target in self.targets if not target.is_bound
+        )
+
+    def get_target(self, bone_id: int) -> SkeletalBoneTarget | None:
+        target = int(bone_id)
+        return next(
+            (item for item in self.targets if item.bone_id == target),
+            None,
+        )
+
+    def with_targets(
+        self,
+        targets: tuple[SkeletalBoneTarget, ...],
+    ) -> SkeletalAnimationClip:
+        return SkeletalAnimationClip(
+            self.name,
+            self.duration,
+            self.looping,
+            self.frames,
+            self.signature,
+            targets,
+        )
 
     def sample(self, time: float, *, loop: bool | None = None) -> SkeletalPose:
         if time < 0.0:
@@ -280,6 +376,7 @@ class SkeletalAnimationClip:
             "duration": self.duration,
             "looping": self.looping,
             "signature": self.signature,
+            "targets": [target.to_data() for target in self.targets],
             "frames": [frame.to_data() for frame in self.frames],
         }
 
@@ -411,6 +508,8 @@ __all__ = [
     "Quaternion",
     "SkeletalAnimationClip",
     "SkeletalBonePose",
+    "SkeletalBoneTarget",
+    "SkeletalMatrix4",
     "SkeletalPose",
     "SkeletalTransform",
     "UvAnimationClip",
