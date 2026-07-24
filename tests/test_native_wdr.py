@@ -15,6 +15,38 @@ from fourfury.wdr import (
 
 
 class NativeWdrTests(unittest.TestCase):
+    def test_facade_decoder_state_remains_patchable_after_module_split(self) -> None:
+        layout = WdrVertexLayout(
+            fvf=1,
+            fvf_size=12,
+            flags=0,
+            dynamic_order=0,
+            channel_count=1,
+            declaration_types=0,
+            elements=(
+                WdrVertexElement(
+                    WdrVertexSemantic.POSITION,
+                    WdrVertexElementType.FLOAT3,
+                    0,
+                ),
+            ),
+            _pointer=0,
+        )
+        reader = _WdrReader(Rsc5Resource(0, 0, b""))
+        original = wdr_module._native_decode_wdr_vertices
+        try:
+            wdr_module._native_decode_wdr_vertices = (
+                lambda *_: {int(WdrVertexSemantic.POSITION): ((1.0, 2.0, 3.0),)}
+            )
+            channels = reader.decode_vertex_channels(b"\0" * 12, 1, 12, layout)
+        finally:
+            wdr_module._native_decode_wdr_vertices = original
+
+        self.assertEqual(
+            channels[WdrVertexSemantic.POSITION],
+            ((1.0, 2.0, 3.0),),
+        )
+
     def test_native_vertex_columns_match_python_fallback(self) -> None:
         elements: list[WdrVertexElement] = []
         offset = 0
