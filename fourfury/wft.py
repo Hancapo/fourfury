@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import struct
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from enum import IntEnum, IntFlag
 from pathlib import Path
@@ -369,7 +369,7 @@ class WftGroup:
         return int(self.flags) & ~_flag_mask(WFT_GROUP_FLAG_INFO)
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, init=False)
 class WftChild:
     undamaged_mass: float
     damaged_mass: float
@@ -378,15 +378,131 @@ class WftChild:
     bone_index: int
     bone_attachment: WdrMatrix4
     link_attachment: WdrMatrix4
-    undamaged_drawable: WftFragmentDrawable | None
-    damaged_drawable: WftFragmentDrawable | None
     events: WftEventReferences
     pointer: int = field(repr=False, compare=False)
     group: WftGroup | None = field(default=None, repr=False, compare=False)
+    _undamaged_drawable_pointer: int = field(default=0, repr=False)
+    _damaged_drawable_pointer: int = field(default=0, repr=False)
+    _drawable_loader: Callable[[int], WftFragmentDrawable | None] | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    _undamaged_drawable: WftFragmentDrawable | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    _damaged_drawable: WftFragmentDrawable | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+
+    def __init__(
+        self,
+        undamaged_mass: float,
+        damaged_mass: float,
+        group_index: int,
+        flags: WftChildFlags,
+        bone_index: int,
+        bone_attachment: WdrMatrix4,
+        link_attachment: WdrMatrix4,
+        undamaged_drawable: WftFragmentDrawable | None,
+        damaged_drawable: WftFragmentDrawable | None,
+        events: WftEventReferences,
+        pointer: int,
+        group: WftGroup | None = None,
+    ) -> None:
+        self.undamaged_mass = undamaged_mass
+        self.damaged_mass = damaged_mass
+        self.group_index = group_index
+        self.flags = flags
+        self.bone_index = bone_index
+        self.bone_attachment = bone_attachment
+        self.link_attachment = link_attachment
+        self.events = events
+        self.pointer = pointer
+        self.group = group
+        self._undamaged_drawable_pointer = (
+            0 if undamaged_drawable is None else undamaged_drawable.pointer
+        )
+        self._damaged_drawable_pointer = (
+            0 if damaged_drawable is None else damaged_drawable.pointer
+        )
+        self._drawable_loader = None
+        self._undamaged_drawable = undamaged_drawable
+        self._damaged_drawable = damaged_drawable
+
+    @classmethod
+    def _from_pointers(
+        cls,
+        undamaged_mass: float,
+        damaged_mass: float,
+        group_index: int,
+        flags: WftChildFlags,
+        bone_index: int,
+        bone_attachment: WdrMatrix4,
+        link_attachment: WdrMatrix4,
+        undamaged_drawable_pointer: int,
+        damaged_drawable_pointer: int,
+        events: WftEventReferences,
+        pointer: int,
+        drawable_loader: Callable[[int], WftFragmentDrawable | None],
+    ) -> WftChild:
+        child = cls(
+            undamaged_mass,
+            damaged_mass,
+            group_index,
+            flags,
+            bone_index,
+            bone_attachment,
+            link_attachment,
+            None,
+            None,
+            events,
+            pointer,
+        )
+        child._undamaged_drawable_pointer = undamaged_drawable_pointer
+        child._damaged_drawable_pointer = damaged_drawable_pointer
+        child._drawable_loader = drawable_loader
+        return child
+
+    @property
+    def undamaged_drawable_pointer(self) -> int:
+        return self._undamaged_drawable_pointer
+
+    @property
+    def damaged_drawable_pointer(self) -> int:
+        return self._damaged_drawable_pointer
+
+    @property
+    def undamaged_drawable(self) -> WftFragmentDrawable | None:
+        if (
+            self._undamaged_drawable is None
+            and self._undamaged_drawable_pointer
+            and self._drawable_loader is not None
+        ):
+            self._undamaged_drawable = self._drawable_loader(
+                self._undamaged_drawable_pointer
+            )
+        return self._undamaged_drawable
+
+    @property
+    def damaged_drawable(self) -> WftFragmentDrawable | None:
+        if (
+            self._damaged_drawable is None
+            and self._damaged_drawable_pointer
+            and self._drawable_loader is not None
+        ):
+            self._damaged_drawable = self._drawable_loader(
+                self._damaged_drawable_pointer
+            )
+        return self._damaged_drawable
 
     @property
     def has_damaged_drawable(self) -> bool:
-        return self.damaged_drawable is not None
+        return self._damaged_drawable_pointer != 0
 
     @property
     def flag_info(self) -> tuple[WftFlagInfo, ...]:
@@ -607,7 +723,7 @@ class _WftReader:
             struct.unpack_from("<I", raw, 0x184)[0],
             struct.unpack_from("<I", raw, 0x250)[0],
         )
-        return WftChild(
+        return WftChild._from_pointers(
             undamaged_mass,
             damaged_mass,
             group_index,
@@ -615,10 +731,11 @@ class _WftReader:
             bone_index,
             bone_attachment,
             link_attachment,
-            self.parse_drawable(undamaged_pointer),
-            self.parse_drawable(damaged_pointer),
+            undamaged_pointer,
+            damaged_pointer,
             WftEventReferences(*event_pointers),
             pointer,
+            self.parse_drawable,
         )
 
     def parse_fragment(self) -> WftFragment:

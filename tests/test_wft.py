@@ -154,6 +154,18 @@ class WftTests(unittest.TestCase):
         self.assertEqual(details[-1].flag, WftGroupFlags(0x80))
         self.assertEqual(details[-1].confidence, "unresolved")
 
+    def test_child_drawables_are_loaded_only_when_accessed(self) -> None:
+        document = WftDocument.from_bytes(_sample_wft())
+        child = document.children[0]
+
+        self.assertEqual(child.undamaged_drawable_pointer, VIRTUAL_BASE | 0x300)
+        self.assertEqual(child.damaged_drawable_pointer, 0)
+        self.assertIsNone(child._undamaged_drawable)
+        self.assertFalse(child.has_damaged_drawable)
+
+        self.assertIs(child.undamaged_drawable, document.drawable)
+        self.assertIs(child._undamaged_drawable, document.drawable)
+
     def test_loads_stream_and_preserves_resource_losslessly(self) -> None:
         source = _sample_wft()
         document = load_wft(io.BytesIO(source))
