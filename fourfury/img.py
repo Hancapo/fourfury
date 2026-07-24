@@ -34,6 +34,7 @@ class ImgEntry:
     table_value: int = 0
     _archive: "ImgArchive | None" = field(default=None, repr=False, compare=False)
     _data: bytes | None = field(default=None, repr=False, compare=False)
+    _logical_size: int | None = field(default=None, repr=False, compare=False)
 
     @property
     def offset(self) -> int:
@@ -51,6 +52,11 @@ class ImgEntry:
         if self._archive is None:
             raise ValueError("detached IMG entry")
         return self._archive.read_entry(self)
+
+    def read_raw(self) -> bytes:
+        if self._archive is None:
+            raise ValueError("detached IMG entry")
+        return self._archive.read_entry_raw(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,14 +186,21 @@ class ImgArchive:
     def find_entry(self, name: str | Path) -> ImgEntry | None:
         return self._index.get(normalize_key(name))
 
+    def read_entry_raw(self, entry: ImgEntry) -> bytes:
+        if entry._data is not None:
+            return bytes(entry._data)
+        return self._read_source(entry.offset, entry.allocated_size)
+
     def read_entry(self, entry: ImgEntry) -> bytes:
         if entry._data is not None:
             return bytes(entry._data)
-        data = self._read_source(entry.offset, entry.size)
-        if len(data) != entry.size:
+        read_size = entry.size if entry._logical_size is None else entry._logical_size
+        data = self._read_source(entry.offset, read_size)
+        if len(data) != read_size:
             raise ValueError(f"truncated IMG3 entry: {entry.name}")
-        if entry.is_resource:
-            return self._trim_resource(data)
+        if entry.is_resource and entry._logical_size is None:
+            data = self._trim_resource(data)
+            entry._logical_size = len(data)
         return data
 
     @staticmethod
@@ -195,17 +208,22 @@ class ImgArchive:
         """Remove sector padding after an RSC5 resource's zlib stream."""
         if len(data) <= 12 or data[:4] != b"RSC\x05":
             return data
-        payload = data[12:]
+        payload = memoryview(data)[12:]
         try:
             inflater = zlib.decompressobj()
-            inflater.decompress(payload)
-            inflater.flush()
+            cursor = 0
+            while cursor < len(payload) and not inflater.eof:
+                pending = payload[cursor : cursor + 64 * 1024]
+                cursor += len(pending)
+                while pending and not inflater.eof:
+                    inflater.decompress(pending, 256 * 1024)
+                    pending = inflater.unconsumed_tail
         except zlib.error:
             # Some empty resources consist solely of their 16-byte header.
-            return data[:12] if not payload.strip(b"\0") else data
+            return data[:12] if not any(payload) else data
         if not inflater.eof:
             return data
-        consumed = len(payload) - len(inflater.unused_data)
+        consumed = cursor - len(inflater.unused_data)
         return data[: 12 + consumed]
 
     def add_file(
@@ -230,6 +248,7 @@ class ImgArchive:
         entry.table_value = resource_flags & 0xFFFFFFFF if resource_flags else entry.size
         entry.used_blocks = align(entry.size) // SECTOR_SIZE
         entry.padding = 0
+        entry._logical_size = entry.size
         self._index[key] = entry
         return entry
 
@@ -251,7 +270,11 @@ class ImgArchive:
             if payload is None:
                 if self._source_bytes is None and self._source_file is None:
                     raise ValueError(f"IMG3 entry has no readable payload: {entry.name}")
-                logical_size = entry.size
+                logical_size = (
+                    entry.size
+                    if entry._logical_size is None
+                    else entry._logical_size
+                )
                 allocated_size = entry.allocated_size
                 used_blocks = entry.used_blocks
                 padding = entry.padding
@@ -356,6 +379,8 @@ class ImgArchive:
             entry.offset_sectors = item.output_offset // SECTOR_SIZE
             entry.used_blocks = item.used_blocks
             entry.padding = item.padding
+            if item.payload is not None:
+                entry._logical_size = item.logical_size
             if clear_data:
                 entry._data = None
 
