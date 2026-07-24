@@ -3,7 +3,7 @@
 FourFury is a Python library for reading, inspecting, extracting, and editing
 Grand Theft Auto IV data files. It provides typed APIs for the game's archives,
 world placements, collision resources, drawables, textures, navigation graphs,
-and related metadata.
+animation dictionaries, and related metadata.
 
 > [!IMPORTANT]
 > FourFury is under active development. Read support is broader than write support,
@@ -23,6 +23,7 @@ and related metadata.
 | WNV | Yes | Limited | Navigation meshes, edges, cover points, and quadtrees |
 | WBN | Yes | Limited | Collision bounds and fixed-size edits |
 | WBD | Yes | Limited | Collision dictionaries and fixed-size edits |
+| WAD | Yes | No | Animation dictionaries, tracks, chunks, and decoded channels |
 | WDD | Yes | No | Hash-addressed drawable dictionaries and neutral model projection |
 | WDR | Yes | No | Drawables plus neutral model projection |
 | WFT | Yes | No | Fragment drawables, physics hierarchy, and collision bounds |

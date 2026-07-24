@@ -1,8 +1,8 @@
 # FourFury documentation
 
-This guide describes FourFury's archive, map, collision, drawable, texture, and
-navigation APIs. Start with the [public README](README.md) for installation and a
-short overview.
+This guide describes FourFury's archive, map, collision, drawable, texture,
+animation, and navigation APIs. Start with the [public README](README.md) for
+installation and a short overview.
 
 FourFury implements Grand Theft Auto IV's native formats directly. It does not
 reinterpret GTA IV data as GTA V resources, and the neutral model layer deliberately
@@ -18,6 +18,7 @@ has no target-game dependency.
 - [Map definitions and placements](#map-definitions-and-placements)
 - [Navigation paths](#navigation-paths)
 - [Collision bounds](#collision-bounds)
+- [Animation dictionaries](#animation-dictionaries)
 - [Drawable models](#drawable-models)
 - [Fragment models](#fragment-models)
 - [Texture dictionaries and GTXD parents](#texture-dictionaries-and-gtxd-parents)
@@ -36,6 +37,7 @@ has no target-game dependency.
 - WNV: typed RSC5 navigation meshes with quantized vertices, polygon flags, adjacency edges, cover points, and quadtrees, with lossless fixed-size editing.
 - WBD: typed RSC5 collision dictionaries with JOAAT lookup, shared bounds, built-in material names, and lossless fixed-size editing.
 - WBN: typed RSC5 collision bounds, composites, quantized geometry, built-in physical-material names, polygons, and BVH trees, with lossless fixed-size editing.
+- WAD: typed RSC5 animation dictionaries with JOAAT lookup, named track and bone metadata, track groups, chunks, decoded static/raw/quantized channels, and frame sampling.
 - WDD: typed hash-addressed RSC5 drawable dictionaries with JOAAT lookup and neutral model projection.
 - WDR: typed RSC5 drawables with LODs, models, decoded vertex declarations, vertex and index buffers, shaders, embedded textures, skeletons, and lights.
 - WFT: typed RSC5 fragment models with reusable WDR drawables, physical groups and children, named flags, damping, inertia, archetypes, and embedded WBN collision bounds.
@@ -310,6 +312,53 @@ print(len(dictionary.bounds), len(dictionary.geometries))
 
 WBD writing supports fixed-size changes to entry hashes, parent/usage metadata, and decoded bounds. Adding or removing dictionary entries requires pointer relocation and is rejected.
 
+## Animation dictionaries
+
+GTA IV stores WAD animation dictionaries as RSC5 resources in
+`pc/anim/anim.img`. Pass the extracted IMG entry bytes directly to `load_wad`:
+
+```python
+from fourfury import ImgArchive, WadTrackId, load_wad
+
+archive = ImgArchive.from_path(game / "pc/anim/anim.img")
+entry = archive.find_entry("amb@arcade.wad")
+if entry is None:
+    raise FileNotFoundError("amb@arcade.wad")
+
+wad = load_wad(entry.read())
+animation = wad.find_animation("play_pinball")
+if animation is None:
+    raise KeyError("play_pinball")
+
+print(animation.name, animation.frame_count, animation.frame_rate)
+for identifier in animation.bone_ids:
+    print(identifier.track_name, identifier.bone_name, identifier.track_type.name)
+
+pelvis_translation = animation.sample(
+    0.5,
+    bone_id=417,
+    track_id=WadTrackId.BONE_TRANSLATION,
+)
+```
+
+`WadDocument` pairs each dictionary hash with a `WadAnimation`. Lookup accepts a
+JOAAT integer, a short animation name, or a `pack:/name.anim` reference.
+Animations expose the serialized track groups, per-bone chunks, channel flags,
+duration, signature, and project flags. `WadBoneId.track_name` handles the
+action-flags bit explicitly, while `bone_name` resolves the stock character,
+facial, and vehicle IDs known to GTA IV.
+
+Static float, integer, vector, and quaternion channels are decoded. Raw float
+and integer arrays and packed quantized floats are also materialized, so
+`vector_at()` and `sample()` can evaluate normal transform tracks without a game
+runtime. RLE integer channels expose their distinct values and decoded signed
+packed sequence. Their runtime timing expansion is not currently modeled;
+calling `value_at()` for such a channel raises `NotImplementedError` instead of
+returning guessed frame data.
+
+The WAD API is a read-only semantic view. `to_bytes()` and `save()` preserve the
+original compressed RSC5 resource exactly.
+
 ## Drawable models
 
 WDR resources expose renderable model geometry rather than collision surfaces. Vertex attributes are decoded according to each file's RAGE declaration, including positions, normals, colors, UV sets, skin data, and tangents:
@@ -533,6 +582,7 @@ print(instance.lod_distance)  # -1.0 uses the model's IDE draw distance
 - RPF3 names are not stored as text in the archive. The API preserves `name_hash` and uses its hexadecimal representation when no external name dictionary is available.
 - IMG3 archives are flat and cannot contain internal directories.
 - WTD structures are currently read-only; decoded texture replacement and dictionary rebuilding are not implemented yet.
+- WAD structures are currently read-only, and RLE integer timing expansion is not modeled yet.
 - WDD structures are currently read-only; dictionary and drawable edits are not serialized yet.
 - WFT structures are currently read-only; drawable, hierarchy, and physics edits are not serialized yet.
 - SCO bytecode is not implemented yet.
