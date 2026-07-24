@@ -273,18 +273,41 @@ class ModelBone:
 class ModelSkeleton:
     bones: tuple[ModelBone, ...]
     signature: int = 0
+    _bones_by_name: dict[str, ModelBone] = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _bones_by_id: dict[int, ModelBone] = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _bones_by_index: dict[int, ModelBone] = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+
+    def __post_init__(self) -> None:
+        by_name: dict[str, ModelBone] = {}
+        by_id: dict[int, ModelBone] = {}
+        by_index: dict[int, ModelBone] = {}
+        for bone in self.bones:
+            by_name.setdefault(bone.name.casefold(), bone)
+            by_id.setdefault(bone.id, bone)
+            by_index.setdefault(bone.index, bone)
+        object.__setattr__(self, "_bones_by_name", by_name)
+        object.__setattr__(self, "_bones_by_id", by_id)
+        object.__setattr__(self, "_bones_by_index", by_index)
 
     def get_bone(self, value: str | int) -> ModelBone | None:
         if isinstance(value, str):
-            key = value.casefold()
-            return next(
-                (bone for bone in self.bones if bone.name.casefold() == key), None
-            )
-        target = int(value)
-        return next((bone for bone in self.bones if bone.id == target), None)
+            return self._bones_by_name.get(value.casefold())
+        return self._bones_by_id.get(int(value))
 
     def get_bone_by_index(self, index: int) -> ModelBone | None:
-        return next((bone for bone in self.bones if bone.index == int(index)), None)
+        return self._bones_by_index.get(int(index))
 
     @property
     def roots(self) -> tuple[ModelBone, ...]:

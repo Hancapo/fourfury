@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 from ._utils import atomic_write
-from .rsc import RSC5_PHYSICAL_BASE, RSC5_VIRTUAL_BASE, Rsc5Resource, rsc5_pointer_offset
+from .rsc import RSC5_VIRTUAL_BASE, Rsc5Resource, rsc5_pointer_offset
 
 
 WTD_RESOURCE_VERSION = 0x08
@@ -119,6 +119,17 @@ class Rsc5TextureDictionary:
     parent_dictionary: int
     usage_count: int
     _pointer: int = field(repr=False, compare=False)
+    _textures_by_name: dict[str, Rsc5Texture] = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+
+    def __post_init__(self) -> None:
+        index: dict[str, Rsc5Texture] = {}
+        for texture in self.textures:
+            index.setdefault(texture.name.casefold(), texture)
+        object.__setattr__(self, "_textures_by_name", index)
 
     @property
     def names(self) -> tuple[str, ...]:
@@ -126,7 +137,7 @@ class Rsc5TextureDictionary:
 
     def get(self, name: str) -> Rsc5Texture | None:
         key = name.casefold().removeprefix("pack:/").removesuffix(".dds")
-        return next((texture for texture in self.textures if texture.name.casefold() == key), None)
+        return self._textures_by_name.get(key)
 
     def __len__(self) -> int:
         return len(self.textures)
