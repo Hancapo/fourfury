@@ -410,12 +410,56 @@ duration, signature, and project flags. `WadBoneId.track_name` handles the
 action-flags bit explicitly, while `bone_name` resolves the stock character,
 facial, and vehicle IDs known to GTA IV.
 
+`WadAnimation.targets` is the complete logical target set across all serialized
+chunk groups. Unlike the compatibility `bone_ids` property, it is not limited
+to the first group. `evaluate_tracks(frame)` and `sample_tracks(time)` return
+values keyed by `(target_id, track_id)` and preserve scalar integers instead of
+coercing every channel to a four-component float vector. Use `track_ids=` to
+select only the tracks needed by a converter:
+
+```python
+values = animation.sample_tracks(
+    0.5,
+    track_ids=(WadTrackId.BONE_TRANSLATION, WadTrackId.BONE_ROTATION),
+)
+```
+
+`iter_frames()` streams format-neutral `AnimationTrackFrame` objects.
+`to_track_animation()` returns a `TrackAnimationClip` with explicit targets and
+step, linear, or quaternion interpolation. Both the WAD animation and neutral
+clip provide `to_data()` for consumers that only accept primitive Python data.
+
+`WadAnimation.kinds` classifies known tracks into stable semantic families:
+skeletal, material, morph, camera, light, generic, action, and custom. The
+corresponding `has_*_tracks` properties support simple filtering without
+requiring consumers to duplicate numeric track tables. Unclassified numeric
+IDs remain `custom`; FourFury does not assign speculative names to them.
+
+`validate()` returns structured `WadValidationIssue` objects instead of raising
+for semantic inconsistencies. Passing a `ModelSkeleton` additionally checks its
+signature and animated bone coverage. `WadDocument.audit()` produces aggregate
+animation, group, target, track-kind, track-ID, and channel-type counts together
+with all validation issues:
+
+```python
+report = wad.audit()
+print(report.is_valid, report.custom_track_ids)
+portable_report = report.to_data()
+```
+
+Adjacent serialized track groups overlap by one sample. `frames_per_group` is
+the decoded group capacity and `frame_group_stride` is the distance to the next
+group; frame evaluation accounts for that overlap, including the final sample.
+
 UV targets use the RAGE `TypeId == 0xFF` sentinel. `WadBoneId.is_uv_channel`,
 `uv_index`, and `type_name` expose that identity without misclassifying it as an
 integer track. `bind_uv(index)` can retarget an existing track using the same
 representation used by the runtime. Animations named with the established
 `name_uv_<material-index>` convention expose `is_uv_animation`,
 `uv_material_index`, and `uv_base_name`.
+Their stock dictionary key is `JOAAT(base_name) + material_index + 1`;
+`wad_animation_hash()` and normal `WadDocument` lookup handle this convention
+while retaining compatibility with dictionaries hashed from the complete name.
 
 Skeletal targets use `WadBoneId.target_key` to identify the logical
 `(bone_id, track_id)` independently from the channel encoding stored in each
@@ -471,10 +515,17 @@ value, while animations with neither row are rejected explicitly.
 Static float, integer, vector, and quaternion channels are decoded. Raw float
 and integer arrays and packed quantized floats are also materialized, so
 `vector_at()` and `sample()` can evaluate normal transform tracks without a game
-runtime. RLE integer channels expose their distinct values and decoded signed
-packed sequence. Their runtime timing expansion is not currently modeled;
-calling `value_at()` for such a channel raises `NotImplementedError` instead of
-returning guessed frame data.
+runtime. RLE integer channels expose their distinct `run_values` and decoded
+`run_lengths`; `value_at(frame)` evaluates them with the same run-boundary
+behavior as the GTA IV runtime. The original packed words, bit count, and Rice
+divisor remain available for low-level inspection.
+
+Known but undecoded channel encodings, and channel type bytes unknown to this
+version of FourFury, no longer prevent the containing WAD from loading.
+`channel_type_value`, `channel_type_name`, `is_supported`, and `header_bytes`
+preserve inspectable metadata. Evaluation still raises `NotImplementedError`
+explicitly, while `WadDocument.audit()` lists unsupported channel names and
+emits structured warnings. The original resource remains lossless.
 
 The WAD API is a read-only semantic view. `to_bytes()` and `save()` preserve the
 original compressed RSC5 resource exactly.

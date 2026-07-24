@@ -3,17 +3,24 @@ from __future__ import annotations
 import math
 import re
 import struct
+from bisect import bisect_right
 from dataclasses import dataclass, field
 from enum import IntEnum, IntFlag
 from pathlib import Path
-from typing import BinaryIO, Callable, Iterator
+from typing import BinaryIO, Callable, Iterable, Iterator
 
 from ._utils import atomic_write
 from .animation import (
+    AnimationTrackFrame,
+    AnimationTrackInterpolation,
+    AnimationTrackTarget,
+    AnimationTrackValue,
+    AnimationValue,
     SkeletalAnimationClip,
     SkeletalBonePose,
     SkeletalPose,
     SkeletalTransform,
+    TrackAnimationClip,
     UvAnimationClip,
     UvAnimationFrame,
     UvTransform,
@@ -28,6 +35,15 @@ from .rsc import (
     rsc5_pointer_offset,
 )
 from .wbd import joaat
+from .wad_audit import (
+    WadAuditReport,
+    WadTrackKind,
+    WadValidationIssue,
+    audit_wad_document,
+    classify_wad_track,
+    validate_wad_animation,
+    validate_wad_document,
+)
 
 
 WAD_RESOURCE_VERSION = 1
@@ -37,6 +53,27 @@ WAD_TRACK_SIZE = 0x10
 WAD_CHUNK_SIZE = 0x18
 WAD_CHANNEL_HEADER_SIZE = 0x08
 _WAD_UV_ANIMATION_NAME = re.compile(r"^(?P<name>.+)_uv_(?P<material>\d+)$", re.IGNORECASE)
+
+
+def _wad_short_name(value: str) -> str:
+    name = value.replace("\\", "/").rsplit("/", 1)[-1]
+    return name[:-5] if name.casefold().endswith(".anim") else name
+
+
+def wad_animation_hash(value: str | bytes) -> int:
+    """Return the stock dictionary hash for an animation name."""
+
+    text = (
+        value.decode("utf-8", errors="replace")
+        if isinstance(value, bytes)
+        else value
+    )
+    short_name = _wad_short_name(text)
+    match = _WAD_UV_ANIMATION_NAME.fullmatch(short_name)
+    if match is None:
+        return joaat(short_name)
+    base_hash = joaat(match.group("name"))
+    return (base_hash + int(match.group("material")) + 1) & 0xFFFFFFFF
 
 
 class WadAnimationFlags(IntFlag):
@@ -70,6 +107,36 @@ class WadChannelType(IntEnum):
     QUADRATIC_BSPLINE = 18
     CUBIC_BSPLINE = 19
     STATIC_SMALLEST_THREE_QUATERNION = 20
+
+
+_SUPPORTED_WAD_CHANNEL_TYPES = frozenset(
+    {
+        WadChannelType.RAW_FLOAT,
+        WadChannelType.STATIC_FLOAT,
+        WadChannelType.QUANTIZED_FLOAT,
+        WadChannelType.RAW_INT,
+        WadChannelType.STATIC_QUATERNION,
+        WadChannelType.STATIC_INT,
+        WadChannelType.RLE_INT,
+        WadChannelType.STATIC_VECTOR3,
+    }
+)
+
+_VECTOR3_WAD_CHANNEL_TYPES = frozenset(
+    {
+        WadChannelType.VECTOR3,
+        WadChannelType.STATIC_VECTOR3,
+    }
+)
+
+_QUATERNION_WAD_CHANNEL_TYPES = frozenset(
+    {
+        WadChannelType.QUATERNION,
+        WadChannelType.STATIC_QUATERNION,
+        WadChannelType.SMALLEST_THREE_QUATERNION,
+        WadChannelType.STATIC_SMALLEST_THREE_QUATERNION,
+    }
+)
 
 
 class WadTrackType(IntEnum):
@@ -365,7 +432,7 @@ ChannelValue = Scalar | tuple[float, ...]
 
 @dataclass(frozen=True, slots=True, init=False, eq=False)
 class WadChannel:
-    channel_type: WadChannelType
+    channel_type: WadChannelType | int
     flags: int
     vector: tuple[float, ...] | None = None
     scale: float | None = None
@@ -375,8 +442,10 @@ class WadChannel:
     packed_sequence_words: tuple[int, ...] = ()
     packed_sequence_bit_count: int = 0
     packed_sequence_divisor: int = 0
+    header_bytes: bytes = field(default=b"", repr=False, compare=False)
     vft: int = field(default=0, repr=False, compare=False)
     pointer: int = field(default=0, repr=False, compare=False)
+    _run_ends: tuple[int, ...] = field(default=(), repr=False, compare=False)
     _values: tuple[Scalar, ...] = field(default=(), repr=False)
     _quantized_values: tuple[int, ...] = field(default=(), repr=False)
     _raw_data: bytes = field(default=b"", repr=False, compare=False)
@@ -388,7 +457,7 @@ class WadChannel:
 
     def __init__(
         self,
-        channel_type: WadChannelType,
+        channel_type: WadChannelType | int,
         flags: int,
         values: tuple[Scalar, ...] = (),
         vector: tuple[float, ...] | None = None,
@@ -403,6 +472,7 @@ class WadChannel:
         vft: int = 0,
         pointer: int = 0,
         *,
+        header_bytes: bytes = b"",
         _raw_data: bytes = b"",
         _raw_code: str = "",
         _raw_count: int = 0,
@@ -432,8 +502,15 @@ class WadChannel:
             "packed_sequence_divisor",
             packed_sequence_divisor,
         )
+        object.__setattr__(self, "header_bytes", bytes(header_bytes))
         object.__setattr__(self, "vft", vft)
         object.__setattr__(self, "pointer", pointer)
+        run_total = 0
+        run_ends: list[int] = []
+        for length in packed_sequence:
+            run_total += length
+            run_ends.append(run_total)
+        object.__setattr__(self, "_run_ends", tuple(run_ends))
         object.__setattr__(self, "_values", tuple(values))
         object.__setattr__(self, "_quantized_values", tuple(quantized_values))
         object.__setattr__(self, "_raw_data", _raw_data)
@@ -561,6 +638,36 @@ class WadChannel:
         }
 
     @property
+    def channel_type_value(self) -> int:
+        return int(self.channel_type)
+
+    @property
+    def channel_type_name(self) -> str:
+        if isinstance(self.channel_type, WadChannelType):
+            return self.channel_type.name
+        return f"UNKNOWN_{self.channel_type_value}"
+
+    @property
+    def is_supported(self) -> bool:
+        return self.channel_type in _SUPPORTED_WAD_CHANNEL_TYPES
+
+    @property
+    def component_count(self) -> int:
+        if self.vector is not None:
+            return len(self.vector)
+        if self.channel_type in _VECTOR3_WAD_CHANNEL_TYPES:
+            return 3
+        if self.channel_type in _QUATERNION_WAD_CHANNEL_TYPES:
+            return 4
+        return 1
+
+    @property
+    def run_lengths(self) -> tuple[int, ...]:
+        """Decoded frame count for each RLE integer value."""
+
+        return self.packed_sequence
+
+    @property
     def value(self) -> ChannelValue | tuple[Scalar, ...] | None:
         if self.vector is not None:
             return self.vector
@@ -571,10 +678,22 @@ class WadChannel:
     def value_at(self, frame: int) -> ChannelValue:
         if frame < 0:
             raise ValueError("WAD channel frame cannot be negative")
-        if self.channel_type == WadChannelType.RLE_INT:
+        if not self.is_supported:
             raise NotImplementedError(
-                "WAD RLE integer timing expansion is not currently implemented"
+                f"WAD channel type {self.channel_type_name} "
+                f"({self.channel_type_value}) cannot be evaluated"
             )
+        if self.channel_type == WadChannelType.RLE_INT:
+            if not self.run_values:
+                raise ValueError("WAD RLE integer channel has no values")
+            if len(self.run_values) != len(self.run_lengths):
+                raise ValueError(
+                    "WAD RLE integer value and run-length counts do not match"
+                )
+            if any(length <= 0 for length in self.run_lengths):
+                raise ValueError("WAD RLE integer run lengths must be positive")
+            run_index = bisect_right(self._run_ends, frame)
+            return self.run_values[min(run_index, len(self.run_values) - 1)]
         if self.vector is not None:
             return self.vector
         if self._raw_data:
@@ -604,6 +723,26 @@ class WadChunk:
     bone_id: WadBoneId
     channels: tuple[WadChannel, ...]
     pointer: int = field(default=0, repr=False, compare=False)
+
+    @property
+    def component_count(self) -> int:
+        return sum(channel.component_count for channel in self.channels)
+
+    def value_at(self, frame: int) -> AnimationValue:
+        """Evaluate the serialized components without coercing integers to floats."""
+
+        result: list[Scalar] = []
+        for channel in self.channels:
+            value = channel.value_at(frame)
+            if isinstance(value, tuple):
+                result.extend(value)
+            else:
+                result.append(value)
+        if not result:
+            return 0.0
+        if len(result) == 1:
+            return result[0]
+        return tuple(result)
 
     def vector_at(self, frame: int) -> tuple[float, float, float, float]:
         result = [0.0, 0.0, 0.0, 0.0]
@@ -678,6 +817,16 @@ class WadAnimation:
     tracks: tuple[WadTrack, ...]
     vft: int = field(default=0, repr=False, compare=False)
     pointer: int = field(default=0, repr=False, compare=False)
+    _targets: tuple[AnimationTrackTarget, ...] = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _targets_by_key: dict[tuple[int, int], AnimationTrackTarget] = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
     _skeletal_tracks: tuple[WadBoneId, ...] = field(
         init=False,
         repr=False,
@@ -696,24 +845,65 @@ class WadAnimation:
 
     def __post_init__(self) -> None:
         unique: dict[tuple[int, int], WadBoneId] = {}
+        target_chunks: dict[tuple[int, int], WadChunk] = {}
         for group in self.tracks:
             for chunk in group.chunks:
                 identifier = chunk.bone_id
+                unique.setdefault(identifier.target_key, identifier)
+                target_chunks.setdefault(identifier.target_key, chunk)
                 if identifier.is_skeletal_transform:
-                    unique.setdefault(identifier.target_key, identifier)
-        tracks = tuple(unique.values())
-        object.__setattr__(self, "_skeletal_tracks", tracks)
+                    continue
+        targets = tuple(
+            self._make_track_target(identifier, target_chunks[key])
+            for key, identifier in unique.items()
+        )
+        target_index = {target.key: target for target in targets}
+        object.__setattr__(self, "_targets", targets)
+        object.__setattr__(self, "_targets_by_key", target_index)
+        skeletal = tuple(
+            identifier
+            for identifier in unique.values()
+            if identifier.is_skeletal_transform
+        )
+        object.__setattr__(self, "_skeletal_tracks", skeletal)
         object.__setattr__(
             self,
             "_skeletal_bone_ids",
-            tuple(dict.fromkeys(item.bone_id for item in tracks)),
+            tuple(dict.fromkeys(item.bone_id for item in skeletal)),
         )
-        object.__setattr__(self, "_skeletal_target_keys", frozenset(unique))
+        object.__setattr__(
+            self,
+            "_skeletal_target_keys",
+            frozenset(item.target_key for item in skeletal),
+        )
+
+    @staticmethod
+    def _make_track_target(
+        identifier: WadBoneId,
+        chunk: WadChunk,
+    ) -> AnimationTrackTarget:
+        track_type = identifier.track_type
+        if track_type is WadTrackType.INTEGER:
+            interpolation = AnimationTrackInterpolation.STEP
+        elif track_type is WadTrackType.QUATERNION:
+            interpolation = AnimationTrackInterpolation.QUATERNION
+        else:
+            interpolation = AnimationTrackInterpolation.LINEAR
+        component_count = chunk.component_count
+        if interpolation is AnimationTrackInterpolation.QUATERNION:
+            component_count = 4
+        return AnimationTrackTarget(
+            target_id=identifier.bone_id,
+            track_id=identifier.track_id,
+            component_count=max(component_count, 1),
+            interpolation=interpolation,
+            target_name=identifier.bone_name,
+            track_name=identifier.track_name,
+        )
 
     @property
     def short_name(self) -> str:
-        name = self.name.replace("\\", "/").rsplit("/", 1)[-1]
-        return name[:-5] if name.casefold().endswith(".anim") else name
+        return _wad_short_name(self.name)
 
     @property
     def uv_material_index(self) -> int | None:
@@ -740,8 +930,93 @@ class WadAnimation:
         return (self.frame_count - 1) / self.duration
 
     @property
+    def frames_per_group(self) -> int:
+        """Decoded sample count covered by a full serialized track group."""
+
+        if self.frames_per_chunk > 0:
+            # Adjacent groups share their boundary sample. The animation field
+            # is the stride, while a full group contains one extra sample.
+            return self.frames_per_chunk + 1
+        return 0 if not self.tracks else self.tracks[0].frames_per_chunk
+
+    @property
+    def frame_group_stride(self) -> int:
+        """Frame distance between adjacent overlapping track groups."""
+
+        if self.frames_per_chunk > 0:
+            return self.frames_per_chunk
+        frames_per_group = self.frames_per_group
+        return max(frames_per_group - 1, 1) if frames_per_group else 0
+
+    @property
     def bone_ids(self) -> tuple[WadBoneId, ...]:
+        """Compatibility view of the first serialized track group."""
+
         return () if not self.tracks else tuple(chunk.bone_id for chunk in self.tracks[0].chunks)
+
+    @property
+    def targets(self) -> tuple[AnimationTrackTarget, ...]:
+        """All logical targets across every serialized track group."""
+
+        return self._targets
+
+    @property
+    def kinds(self) -> tuple[WadTrackKind, ...]:
+        """Semantic track families present in this animation."""
+
+        present = {
+            classify_wad_track(target.track_id)
+            for target in self.targets
+        }
+        return tuple(kind for kind in WadTrackKind if kind in present)
+
+    def _has_kind(self, kind: WadTrackKind) -> bool:
+        return any(
+            classify_wad_track(target.track_id) is kind
+            for target in self.targets
+        )
+
+    @property
+    def has_skeletal_tracks(self) -> bool:
+        return self._has_kind(WadTrackKind.SKELETAL)
+
+    @property
+    def has_material_tracks(self) -> bool:
+        return self._has_kind(WadTrackKind.MATERIAL)
+
+    @property
+    def has_morph_tracks(self) -> bool:
+        return self._has_kind(WadTrackKind.MORPH)
+
+    @property
+    def has_camera_tracks(self) -> bool:
+        return self._has_kind(WadTrackKind.CAMERA)
+
+    @property
+    def has_light_tracks(self) -> bool:
+        return self._has_kind(WadTrackKind.LIGHT)
+
+    @property
+    def has_action_tracks(self) -> bool:
+        return self._has_kind(WadTrackKind.ACTION)
+
+    @property
+    def has_custom_tracks(self) -> bool:
+        return self._has_kind(WadTrackKind.CUSTOM)
+
+    def iter_tracks(self) -> Iterator[AnimationTrackTarget]:
+        """Iterate logical tracks independently from per-block channel encoding."""
+
+        return iter(self.targets)
+
+    def validate(
+        self,
+        *,
+        skeleton: ModelSkeleton | None = None,
+    ) -> tuple[WadValidationIssue, ...]:
+        """Return structured diagnostics without mutating the animation."""
+
+        return validate_wad_animation(self, skeleton=skeleton)
 
     @property
     def skeletal_tracks(self) -> tuple[WadBoneId, ...]:
@@ -912,17 +1187,192 @@ class WadAnimation:
             raise ValueError("WAD animation frame cannot be negative")
         if self.frame_count:
             frame = min(frame, self.frame_count - 1)
-        frames_per_chunk = self.frames_per_chunk or self.tracks[0].frames_per_chunk
-        if frames_per_chunk <= 0:
+        group_stride = self.frame_group_stride
+        if group_stride <= 0:
             raise ValueError("WAD animation has no valid frames-per-chunk value")
-        group_index = min(frame // frames_per_chunk, len(self.tracks) - 1)
+        group_index = min(frame // group_stride, len(self.tracks) - 1)
         chunk = self.tracks[group_index].find_chunk(bone_id, track_id)
         if chunk is None:
             suffix = "" if track_id is None else f" on track {int(track_id)}"
             raise KeyError(f"WAD animation has no bone {bone_id}{suffix}")
-        return chunk.vector_at(frame % frames_per_chunk)
+        return chunk.vector_at(frame - (group_index * group_stride))
 
     evaluate_frame = vector_at
+
+    def _group_at(self, frame: int) -> tuple[WadTrack, int]:
+        if not self.tracks:
+            raise ValueError("WAD animation has no track groups")
+        if frame < 0:
+            raise ValueError("WAD animation frame cannot be negative")
+        if self.frame_count:
+            frame = min(frame, self.frame_count - 1)
+        group_stride = self.frame_group_stride
+        if group_stride <= 0:
+            raise ValueError("WAD animation has no valid frames-per-chunk value")
+        group_index = min(frame // group_stride, len(self.tracks) - 1)
+        return (
+            self.tracks[group_index],
+            frame - (group_index * group_stride),
+        )
+
+    @staticmethod
+    def _track_filter(
+        track_ids: Iterable[int | WadTrackId] | None,
+    ) -> frozenset[int] | None:
+        return (
+            None
+            if track_ids is None
+            else frozenset(int(track_id) for track_id in track_ids)
+        )
+
+    def evaluate_tracks(
+        self,
+        frame: int,
+        *,
+        track_ids: Iterable[int | WadTrackId] | None = None,
+    ) -> dict[tuple[int, int], AnimationValue]:
+        """Evaluate every selected logical track at an integer frame."""
+
+        selected = self._track_filter(track_ids)
+        group, local_frame = self._group_at(frame)
+        return {
+            chunk.bone_id.target_key: chunk.value_at(local_frame)
+            for chunk in group.chunks
+            if selected is None or chunk.bone_id.track_id in selected
+        }
+
+    def track_frame_at(
+        self,
+        frame: int,
+        *,
+        track_ids: Iterable[int | WadTrackId] | None = None,
+    ) -> AnimationTrackFrame:
+        count = max(self.frame_count, 1)
+        frame = min(max(int(frame), 0), count - 1)
+        time = (
+            0.0
+            if count <= 1 or self.duration <= 0.0
+            else (frame / (count - 1)) * self.duration
+        )
+        values = self.evaluate_tracks(frame, track_ids=track_ids)
+        return AnimationTrackFrame(
+            time,
+            tuple(
+                AnimationTrackValue(self._targets_by_key[key], value)
+                for key, value in values.items()
+            ),
+        )
+
+    def sample_tracks(
+        self,
+        time: float,
+        *,
+        track_ids: Iterable[int | WadTrackId] | None = None,
+        loop: bool | None = None,
+    ) -> dict[tuple[int, int], AnimationValue]:
+        """Sample selected logical tracks at a time in seconds."""
+
+        if time < 0.0:
+            raise ValueError("WAD animation time cannot be negative")
+        selected = self._track_filter(track_ids)
+        if self.frame_count <= 1 or self.duration <= 0.0:
+            return self.evaluate_tracks(0, track_ids=selected)
+        should_loop = bool(self.flags & WadAnimationFlags.LOOPED) if loop is None else loop
+        if should_loop:
+            time %= self.duration
+        else:
+            time = min(time, self.duration)
+        frame = time * self.frame_rate
+        frame0 = min(math.floor(frame), self.frame_count - 1)
+        frame1 = frame0 + 1
+        if frame1 >= self.frame_count:
+            frame1 = 0 if should_loop else self.frame_count - 1
+        alpha = frame - frame0
+        values0 = self.evaluate_tracks(frame0, track_ids=selected)
+        values1 = self.evaluate_tracks(frame1, track_ids=selected)
+        result: dict[tuple[int, int], AnimationValue] = {}
+        for key in dict.fromkeys((*values0, *values1)):
+            value0 = values0.get(key)
+            value1 = values1.get(key)
+            if value0 is None:
+                assert value1 is not None
+                result[key] = value1
+            elif value1 is None:
+                result[key] = value0
+            else:
+                result[key] = AnimationTrackValue(
+                    self._targets_by_key[key],
+                    value0,
+                ).interpolate(
+                    AnimationTrackValue(self._targets_by_key[key], value1),
+                    alpha,
+                ).value
+        return result
+
+    def sample_track_frame(
+        self,
+        time: float,
+        *,
+        track_ids: Iterable[int | WadTrackId] | None = None,
+        loop: bool | None = None,
+    ) -> AnimationTrackFrame:
+        should_loop = bool(self.flags & WadAnimationFlags.LOOPED) if loop is None else loop
+        sample_time = time
+        if self.duration > 0.0:
+            sample_time = (
+                time % self.duration
+                if should_loop
+                else min(time, self.duration)
+            )
+        values = self.sample_tracks(time, track_ids=track_ids, loop=should_loop)
+        return AnimationTrackFrame(
+            sample_time,
+            tuple(
+                AnimationTrackValue(self._targets_by_key[key], value)
+                for key, value in values.items()
+            ),
+        )
+
+    def iter_frames(
+        self,
+        *,
+        track_ids: Iterable[int | WadTrackId] | None = None,
+    ) -> Iterator[AnimationTrackFrame]:
+        """Yield neutral arbitrary-track frames without retaining a full clip."""
+
+        for frame in range(max(self.frame_count, 1)):
+            yield self.track_frame_at(frame, track_ids=track_ids)
+
+    def to_track_animation(
+        self,
+        *,
+        track_ids: Iterable[int | WadTrackId] | None = None,
+    ) -> TrackAnimationClip:
+        """Project selected WAD tracks into the format-neutral track contract."""
+
+        selected = self._track_filter(track_ids)
+        targets = tuple(
+            target
+            for target in self.targets
+            if selected is None or target.track_id in selected
+        )
+        return TrackAnimationClip(
+            name=self.short_name,
+            duration=max(self.duration, 0.0),
+            looping=bool(self.flags & WadAnimationFlags.LOOPED),
+            targets=targets,
+            frames=tuple(self.iter_frames(track_ids=selected)),
+            signature=self.signature,
+        )
+
+    def to_data(
+        self,
+        *,
+        track_ids: Iterable[int | WadTrackId] | None = None,
+    ) -> dict[str, object]:
+        """Return primitive neutral track data for external converters."""
+
+        return self.to_track_animation(track_ids=track_ids).to_data()
 
     def sample(
         self,
@@ -965,12 +1415,12 @@ class WadAnimation:
             raise ValueError("WAD animation frame cannot be negative")
         if self.frame_count:
             frame = min(frame, self.frame_count - 1)
-        frames_per_chunk = self.frames_per_chunk or self.tracks[0].frames_per_chunk
-        if frames_per_chunk <= 0:
+        group_stride = self.frame_group_stride
+        if group_stride <= 0:
             raise ValueError("WAD animation has no valid frames-per-chunk value")
-        group_index = min(frame // frames_per_chunk, len(self.tracks) - 1)
+        group_index = min(frame // group_stride, len(self.tracks) - 1)
         group = self.tracks[group_index]
-        local_frame = frame % frames_per_chunk
+        local_frame = frame - (group_index * group_stride)
         row_u_chunk = group.find_track_chunk(WadTrackId.SHADER_SLIDE_U)
         row_v_chunk = group.find_track_chunk(WadTrackId.SHADER_SLIDE_V)
         if row_u_chunk is None and row_v_chunk is None:
@@ -1098,21 +1548,46 @@ class WadDocument:
 
     def find_entry(self, name_or_hash: str | bytes | int) -> WadEntry | None:
         if isinstance(name_or_hash, int):
-            target = name_or_hash
+            return self._entries_by_hash.get(name_or_hash)
+        if isinstance(name_or_hash, bytes):
+            value = name_or_hash.decode("utf-8", errors="replace")
         else:
-            if isinstance(name_or_hash, bytes):
-                value = name_or_hash.decode("utf-8", errors="replace")
-            else:
-                value = name_or_hash
-            value = value.replace("\\", "/").rsplit("/", 1)[-1]
-            if value.casefold().endswith(".anim"):
-                value = value[:-5]
-            target = joaat(value)
-        return self._entries_by_hash.get(target)
+            value = name_or_hash
+        short_name = _wad_short_name(value)
+        candidates = (
+            wad_animation_hash(short_name),
+            joaat(short_name),
+        )
+        return next(
+            (
+                entry
+                for candidate in dict.fromkeys(candidates)
+                if (entry := self._entries_by_hash.get(candidate)) is not None
+            ),
+            None,
+        )
 
     def find_animation(self, name_or_hash: str | bytes | int) -> WadAnimation | None:
         entry = self.find_entry(name_or_hash)
         return None if entry is None else entry.animation
+
+    def validate(
+        self,
+        *,
+        skeleton: ModelSkeleton | None = None,
+    ) -> tuple[WadValidationIssue, ...]:
+        """Return structured dictionary and animation diagnostics."""
+
+        return validate_wad_document(self, skeleton=skeleton)
+
+    def audit(
+        self,
+        *,
+        skeleton: ModelSkeleton | None = None,
+    ) -> WadAuditReport:
+        """Summarize structures, semantic track families, and validation issues."""
+
+        return audit_wad_document(self, skeleton=skeleton)
 
     def to_bytes(self) -> bytes:
         """Return the original lossless RSC5 resource."""
@@ -1229,15 +1704,9 @@ class _WadReader:
         cached = self._channels.get(pointer)
         if cached is not None:
             return cached
-        vft, flags, type_value, _padding = self.unpack(
-            pointer,
-            "<IBBH",
-            "WAD animation channel",
-        )
-        try:
-            channel_type = WadChannelType(type_value)
-        except ValueError as exc:
-            raise ValueError(f"unsupported WAD animation channel type: {type_value}") from exc
+        raw_header = self.read(pointer, WAD_CHANNEL_HEADER_SIZE, "WAD animation channel")
+        vft, flags, type_value, _padding = struct.unpack("<IBBH", raw_header)
+        channel_type = WadChannelType._value2member_map_.get(type_value, type_value)
 
         values: tuple[Scalar, ...] = ()
         vector: tuple[float, ...] | None = None
@@ -1270,7 +1739,7 @@ class _WadReader:
             raw_code = "f" if channel_type == WadChannelType.RAW_FLOAT else "i"
             data_pointer, raw_count = self.array_header(
                 pointer + 8,
-                f"WAD {channel_type.name} values",
+                f"WAD {WadChannelType(type_value).name} values",
             )
             raw_data = (
                 b""
@@ -1278,7 +1747,7 @@ class _WadReader:
                 else self.read(
                     data_pointer,
                     raw_count * 4,
-                    f"WAD {channel_type.name} values",
+                    f"WAD {WadChannelType(type_value).name} values",
                 )
             )
         elif channel_type == WadChannelType.QUANTIZED_FLOAT:
@@ -1318,22 +1787,15 @@ class _WadReader:
                 if word_count
                 else ()
             )
-            # The packed sequence contains one signed transition code between
-            # adjacent values. GTA IV's runtime expansion of those codes is not
-            # yet understood well enough to present it as frame values.
             packed_sequence = self._decode_packed_sequence(
                 words,
                 sequence_bits,
                 divisor,
-                max(0, len(run_values) - 1),
+                len(run_values),
             )
             packed_sequence_words = words
             packed_sequence_bit_count = sequence_bits
             packed_sequence_divisor = divisor
-        else:
-            raise ValueError(
-                f"WAD animation channel type {channel_type.name} is not implemented"
-            )
 
         channel = WadChannel(
             channel_type,
@@ -1350,6 +1812,7 @@ class _WadReader:
             packed_sequence_divisor,
             vft,
             pointer,
+            header_bytes=raw_header,
             _raw_data=raw_data,
             _raw_code=raw_code,
             _raw_count=raw_count,
@@ -1380,12 +1843,12 @@ class _WadReader:
         result: list[int] = []
         for _ in range(count):
             try:
-                remainder = 0
-                for bit in range(divisor):
-                    remainder |= get_bit() << bit
                 quotient = 0
                 while get_bit() == 0:
                     quotient += 1
+                remainder = 0
+                for bit in range(divisor):
+                    remainder |= get_bit() << bit
                 value = (quotient << divisor) | remainder
                 if value and get_bit():
                     value = -value
@@ -1427,4 +1890,5 @@ __all__ = [
     "WadTrackPacking",
     "WadTrackType",
     "load_wad",
+    "wad_animation_hash",
 ]

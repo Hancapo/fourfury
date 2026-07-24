@@ -1,4 +1,10 @@
 from .animation import (
+    AnimationScalar,
+    AnimationTrackFrame,
+    AnimationTrackInterpolation,
+    AnimationTrackTarget,
+    AnimationTrackValue,
+    AnimationValue,
     Quaternion,
     SkeletalAnimationClip,
     SkeletalBonePose,
@@ -6,6 +12,7 @@ from .animation import (
     SkeletalMatrix4,
     SkeletalPose,
     SkeletalTransform,
+    TrackAnimationClip,
     UvAnimationClip,
     UvAnimationFrame,
     UvMatrix3,
@@ -162,6 +169,17 @@ from .wad import (
     WadTrackPacking,
     WadTrackType,
     load_wad,
+    wad_animation_hash,
+)
+from .wad_audit import (
+    WadAuditReport,
+    WadIssueSeverity,
+    WadTrackKind,
+    WadValidationIssue,
+    audit_wad_document,
+    classify_wad_track,
+    validate_wad_animation,
+    validate_wad_document,
 )
 from .wbd import WBD_DICTIONARY_SIZE, WBD_RESOURCE_VERSION, WbdDocument, WbdEntry, joaat, load_wbd
 from .wbn import (
@@ -345,6 +363,8 @@ from .wpl_lod import (
 __version__ = "0.1.0"
 
 __all__ = [
+    "AnimationScalar", "AnimationTrackFrame", "AnimationTrackInterpolation",
+    "AnimationTrackTarget", "AnimationTrackValue", "AnimationValue",
     "GTAIVCrypto", "GTAIV_AES_KEY", "GTAIV_KEY_SHA1", "GTXD_SECTION", "GtxdDependency",
     "GtxdDocument", "GtxdHierarchy", "IMG3_ENTRY_SIZE", "IMG3_MAGIC",
     "IMG3_VERSION", "IDE_ARCHETYPE_SECTIONS", "IdeArchetype", "IdeArchetypeFlags",
@@ -374,7 +394,7 @@ __all__ = [
     "Rsc5TextureDictionary", "Rsc5TextureFormat", "WBN_BOUND_SIZE",
     "SkeletalAnimationClip", "SkeletalBonePose", "SkeletalBoneTarget",
     "SkeletalMatrix4", "SkeletalPose",
-    "SkeletalTransform",
+    "SkeletalTransform", "TrackAnimationClip",
     "UvAnimationClip", "UvAnimationFrame", "UvMatrix3", "UvTransform", "UvVector2",
     "UvVector4", "Vector3",
     "WAD_ANIMATION_SIZE", "WAD_BONE_TRANSFORM_TRACKS", "WAD_CHANNEL_HEADER_SIZE",
@@ -382,8 +402,9 @@ __all__ = [
     "WAD_DICTIONARY_SIZE", "WAD_MOVER_TRANSFORM_TRACKS", "WAD_RESOURCE_VERSION",
     "WAD_SKELETAL_TRACKS", "WAD_TRACK_SIZE",
     "WadAnimation", "WadAnimationFlags", "WadBoneId", "WadBoneName",
-    "WadChannel", "WadChannelType", "WadChunk", "WadDocument", "WadEntry",
-    "WadTrack", "WadTrackId", "WadTrackPacking", "WadTrackType",
+    "WadAuditReport", "WadChannel", "WadChannelType", "WadChunk", "WadDocument",
+    "WadEntry", "WadIssueSeverity", "WadTrack", "WadTrackId", "WadTrackKind",
+    "WadTrackPacking", "WadTrackType", "WadValidationIssue",
     "interpolate_quaternion", "normalize_quaternion",
     "WBN_BVH_GEOMETRY_SIZE", "WBN_COMPOSITE_SIZE", "WBN_GEOMETRY_SIZE",
     "WBD_DICTIONARY_SIZE", "WBD_RESOURCE_VERSION", "WBN_RESOURCE_VERSION", "WPL_HEADER_SIZE",
@@ -422,10 +443,14 @@ __all__ = [
     "WplLodCull", "WplLodEdge", "WplLodHierarchy", "WplLodHierarchyError", "WplLodIssue",
     "WplLodIssueCode", "WplLodNode", "WplLodParentScope", "WplParkedCar", "WplStrBig",
     "WplMloPortal", "WplTimeCycleModifier", "WplZone",
-    "combine_nod_graphs", "combine_path_graphs", "create_gtxd", "create_ide", "create_img", "create_ipl", "create_rpf", "create_wpl", "joaat",
+    "audit_wad_document", "classify_wad_track", "combine_nod_graphs",
+    "combine_path_graphs", "create_gtxd", "create_ide", "create_img", "create_ipl",
+    "create_rpf", "create_wpl", "joaat",
     "explain_instance_flags", "explain_node_flags", "find_wdr_shader_definition",
     "find_wdr_shader_program",
     "extract_aes_key", "load_ide", "load_img", "load_ipl", "load_nod", "load_nod_graph", "load_rpf", "load_wbn",
-    "load_gtxd", "load_wad", "load_wbd", "load_wdd", "load_wdr", "load_wft", "load_wnv", "load_wpl", "load_wtd", "read_rsc5_texture_dictionary",
+    "load_gtxd", "load_wad", "load_wbd", "load_wdd", "load_wdr", "load_wft",
+    "load_wnv", "load_wpl", "load_wtd", "read_rsc5_texture_dictionary",
     "parse_mlo_archetypes", "rsc5_physical_size", "rsc5_pointer_offset", "rsc5_virtual_size",
+    "validate_wad_animation", "validate_wad_document", "wad_animation_hash",
 ]

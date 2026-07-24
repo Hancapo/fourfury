@@ -6,6 +6,7 @@ import unittest
 import zlib
 from dataclasses import replace
 
+import fourfury.wad as wad_module
 from fourfury import (
     WAD_RESOURCE_VERSION,
     WadAnimation,
@@ -18,8 +19,10 @@ from fourfury import (
     WadDocument,
     WadTrack,
     WadTrackId,
+    WadTrackKind,
     joaat,
     load_wad,
+    wad_animation_hash,
 )
 
 
@@ -141,7 +144,7 @@ def _sample_wad(*, hash_count: int = 1, animation_count: int = 1) -> bytes:
         2,
     )
     struct.pack_into("<2i", virtual, 0x760, 2048, 0)
-    struct.pack_into("<I", virtual, 0x770, 0b0111)
+    struct.pack_into("<I", virtual, 0x770, 0b01010011)
 
     struct.pack_into(
         "<IBBHIHH",
@@ -249,6 +252,169 @@ class WadTests(unittest.TestCase):
         self.assertAlmostEqual(sampled[1], 10.5)
         self.assertAlmostEqual(sampled[2], 5.0)
 
+    def test_projects_selected_logical_tracks_into_neutral_frames(self) -> None:
+        animation = WadDocument.from_bytes(_sample_wad()).animations[0]
+
+        self.assertEqual(
+            tuple(target.key for target in animation.targets),
+            (
+                (417, int(WadTrackId.BONE_TRANSLATION)),
+                (417, int(WadTrackId.BONE_ROTATION)),
+                (0, int(WadTrackId.ACTION_FLAGS)),
+            ),
+        )
+        self.assertEqual(tuple(animation.iter_tracks()), animation.targets)
+        self.assertEqual(
+            animation.evaluate_tracks(
+                1,
+                track_ids=(
+                    WadTrackId.BONE_TRANSLATION,
+                    WadTrackId.BONE_ROTATION,
+                ),
+            ),
+            {
+                (417, int(WadTrackId.BONE_TRANSLATION)): (2.0, 11.0, 5.0),
+                (417, int(WadTrackId.BONE_ROTATION)): (0.0, 0.0, 0.0, 1.0),
+            },
+        )
+        sampled = animation.sample_tracks(
+            1.0 / 60.0,
+            track_ids=(WadTrackId.BONE_TRANSLATION,),
+        )
+        sampled_translation = sampled[
+            (417, int(WadTrackId.BONE_TRANSLATION))
+        ]
+        assert isinstance(sampled_translation, tuple)
+        self.assertAlmostEqual(sampled_translation[0], 1.5)
+        self.assertAlmostEqual(sampled_translation[1], 10.5)
+        self.assertAlmostEqual(sampled_translation[2], 5.0)
+
+        clip = animation.to_track_animation(
+            track_ids=(
+                WadTrackId.BONE_TRANSLATION,
+                WadTrackId.BONE_ROTATION,
+            ),
+        )
+        self.assertEqual(clip.name, "walk")
+        self.assertEqual(clip.frame_count, 3)
+        self.assertEqual(len(clip.targets), 2)
+        self.assertEqual(
+            clip.frames[1].get(417, WadTrackId.BONE_TRANSLATION).value,  # type: ignore[union-attr]
+            (2.0, 11.0, 5.0),
+        )
+        self.assertEqual(
+            animation.to_data(
+                track_ids=(WadTrackId.BONE_TRANSLATION,),
+            )["name"],
+            "walk",
+        )
+
+    def test_classifies_and_audits_logical_track_families(self) -> None:
+        document = WadDocument.from_bytes(_sample_wad(), name="sample.wad")
+        animation = document.animations[0]
+
+        self.assertEqual(
+            animation.kinds,
+            (WadTrackKind.SKELETAL, WadTrackKind.ACTION),
+        )
+        self.assertTrue(animation.has_skeletal_tracks)
+        self.assertTrue(animation.has_action_tracks)
+        self.assertFalse(animation.has_material_tracks)
+        self.assertFalse(animation.has_morph_tracks)
+        self.assertFalse(animation.has_camera_tracks)
+        self.assertFalse(animation.has_light_tracks)
+        self.assertFalse(animation.has_custom_tracks)
+        self.assertEqual(animation.validate(), ())
+
+        report = document.audit()
+
+        self.assertTrue(report.is_valid)
+        self.assertEqual(report.error_count, 0)
+        self.assertEqual(report.warning_count, 0)
+        self.assertEqual(report.animation_count, 1)
+        self.assertEqual(report.track_group_count, 1)
+        self.assertEqual(report.target_count, 3)
+        self.assertEqual(report.channel_count, 6)
+        self.assertEqual(report.track_kinds, {"action": 1, "skeletal": 2})
+        self.assertEqual(report.custom_track_ids, ())
+        self.assertEqual(report.to_data()["is_valid"], True)
+
+    def test_reports_custom_tracks_and_inconsistent_group_layouts(self) -> None:
+        skeletal = WadChunk(
+            WadBoneId(WadTrackId.BONE_TRANSLATION, 0, 417),
+            (WadChannel(WadChannelType.STATIC_VECTOR3, 0, vector=(0.0, 0.0, 0.0)),),
+        )
+        custom = WadChunk(
+            WadBoneId(143, 2, 0),
+            (WadChannel(WadChannelType.STATIC_FLOAT, 0, (1.0,)),),
+        )
+        animation = WadAnimation(
+            "pack:/custom.anim",
+            WadAnimationFlags.NONE,
+            0,
+            4,
+            2,
+            1.0,
+            0,
+            (
+                WadTrack((skeletal, custom), skeletal.bone_id, 3, 0),
+                WadTrack((skeletal,), skeletal.bone_id, 2, 0),
+            ),
+        )
+
+        self.assertEqual(
+            animation.kinds,
+            (WadTrackKind.SKELETAL, WadTrackKind.CUSTOM),
+        )
+        self.assertTrue(animation.has_custom_tracks)
+        issues = animation.validate()
+        self.assertEqual(
+            {issue.code for issue in issues},
+            {"inconsistent_targets"},
+        )
+
+    def test_uses_inclusive_sequence_limit_for_track_group_boundaries(self) -> None:
+        identifier = WadBoneId(WadTrackId.BONE_TRANSLATION, 2, 417)
+        first = WadChunk(
+            identifier,
+            (WadChannel(WadChannelType.RAW_FLOAT, 0, (10.0, 11.0, 12.0)),),
+        )
+        second = WadChunk(
+            identifier,
+            (WadChannel(WadChannelType.RAW_FLOAT, 0, (12.0, 13.0)),),
+        )
+        animation = WadAnimation(
+            "pack:/groups.anim",
+            WadAnimationFlags.NONE,
+            0,
+            4,
+            2,
+            1.0,
+            0,
+            (
+                WadTrack((first,), identifier, 3, 0),
+                WadTrack((second,), identifier, 2, 0),
+            ),
+        )
+
+        self.assertEqual(animation.frames_per_group, 3)
+        self.assertEqual(animation.frame_group_stride, 2)
+        self.assertEqual(animation.vector_at(1, 417), (11.0, 0.0, 0.0, 0.0))
+        self.assertEqual(animation.vector_at(2, 417), (12.0, 0.0, 0.0, 0.0))
+        self.assertEqual(animation.vector_at(3, 417), (13.0, 0.0, 0.0, 0.0))
+        self.assertEqual(animation.validate(), ())
+
+    def test_resolves_stock_uv_dictionary_hash_convention(self) -> None:
+        source = _sample_uv_wad()
+        virtual = bytearray(zlib.decompress(source[12:]))
+        canonical_hash = wad_animation_hash("pack:/television_uv_2.anim")
+        struct.pack_into("<I", virtual, 0x100, canonical_hash)
+        document = WadDocument.from_bytes(source[:12] + zlib.compress(virtual))
+
+        self.assertEqual(canonical_hash, (joaat("television") + 3) & 0xFFFFFFFF)
+        self.assertIsNotNone(document.find_animation("television_uv_2"))
+        self.assertEqual(document.validate(), ())
+
     def test_defers_sampled_channel_materialization(self) -> None:
         animation = WadDocument.from_bytes(_sample_wad()).animations[0]
         translation = animation.tracks[0].chunks[0]
@@ -281,16 +447,49 @@ class WadTests(unittest.TestCase):
         rle, raw = action.channels
 
         self.assertEqual(rle.run_values, (2048, 0))
-        self.assertEqual(rle.packed_sequence, (3,))
-        self.assertEqual(rle.packed_sequence_words, (0b0111,))
+        self.assertEqual(rle.run_lengths, (1, 2))
+        self.assertEqual(rle.packed_sequence, (1, 2))
+        self.assertEqual(rle.packed_sequence_words, (0b01010011,))
         self.assertEqual(rle.packed_sequence_bit_count, 8)
         self.assertEqual(rle.packed_sequence_divisor, 2)
-        with self.assertRaisesRegex(NotImplementedError, "timing expansion"):
-            rle.value_at(0)
+        self.assertEqual(tuple(rle.value_at(frame) for frame in range(4)), (2048, 0, 0, 0))
         self.assertEqual(raw.values, (7, 8, 9))
         self.assertEqual(raw.value_at(1), 8)
         self.assertEqual(action.bone_id.track, WadTrackId.ACTION_FLAGS)
         self.assertFalse(action.bone_id.is_skeletal_transform)
+
+    def test_decodes_rle_prefix_before_remainder(self) -> None:
+        # divisor=2, runs=(8, 2): 001 00 0, 1 01 0 in read order.
+        words = (0b0101000100,)
+
+        self.assertEqual(
+            wad_module._WadReader._decode_packed_sequence(words, 10, 2, 2),
+            (8, 2),
+        )
+
+    def test_preserves_unknown_channel_headers_for_lossless_inspection(self) -> None:
+        source = _sample_wad()
+        virtual = bytearray(zlib.decompress(source[12:]))
+        struct.pack_into("<B", virtual, 0x465, 0xFF)
+        unknown_source = source[:12] + zlib.compress(virtual)
+
+        document = WadDocument.from_bytes(unknown_source, name="unknown.wad")
+        channel = document.animations[0].tracks[0].chunks[0].channels[2]
+
+        self.assertEqual(channel.channel_type_value, 0xFF)
+        self.assertEqual(channel.channel_type_name, "UNKNOWN_255")
+        self.assertFalse(channel.is_supported)
+        self.assertEqual(channel.header_bytes, bytes(virtual[0x460:0x468]))
+        with self.assertRaisesRegex(NotImplementedError, "UNKNOWN_255"):
+            channel.value_at(0)
+        report = document.audit()
+        self.assertEqual(report.unsupported_channel_types, ("UNKNOWN_255",))
+        self.assertEqual(report.channel_types["UNKNOWN_255"], 1)
+        self.assertIn(
+            "unsupported_channel_type",
+            {issue.code for issue in report.issues},
+        )
+        self.assertEqual(document.to_bytes(), unknown_source)
 
     def test_models_uv_identity_without_misclassifying_it_as_integer(self) -> None:
         identifier = WadBoneId(WadTrackId.SHADER_SLIDE_U, 0xFF, 3)
