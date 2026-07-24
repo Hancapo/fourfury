@@ -66,6 +66,7 @@ class WadAuditReport:
     track_kinds: dict[str, int]
     track_ids: dict[int, int]
     channel_types: dict[str, int]
+    unsupported_channel_types: tuple[str, ...]
     custom_track_ids: tuple[int, ...]
     issues: tuple[WadValidationIssue, ...]
 
@@ -97,6 +98,7 @@ class WadAuditReport:
             "track_kinds": dict(self.track_kinds),
             "track_ids": dict(self.track_ids),
             "channel_types": dict(self.channel_types),
+            "unsupported_channel_types": list(self.unsupported_channel_types),
             "custom_track_ids": list(self.custom_track_ids),
             "error_count": self.error_count,
             "warning_count": self.warning_count,
@@ -277,6 +279,53 @@ def validate_wad_animation(
             )
             for chunk in group.chunks
         }
+        for chunk in group.chunks:
+            for channel in chunk.channels:
+                if not channel.is_supported:
+                    add(
+                        "unsupported_channel_type",
+                        f"channel type {channel.channel_type_name} "
+                        f"({channel.channel_type_value}) is preserved but cannot be evaluated",
+                        WadIssueSeverity.WARNING,
+                        group_index=group_index,
+                        target_id=chunk.bone_id.bone_id,
+                        track_id=chunk.bone_id.track_id,
+                    )
+                    continue
+                if channel.channel_type_value != 12:
+                    continue
+                if len(channel.run_values) != len(channel.run_lengths):
+                    add(
+                        "truncated_rle_sequence",
+                        f"RLE channel has {len(channel.run_values)} values but "
+                        f"{len(channel.run_lengths)} decoded run lengths",
+                        WadIssueSeverity.ERROR,
+                        group_index=group_index,
+                        target_id=chunk.bone_id.bone_id,
+                        track_id=chunk.bone_id.track_id,
+                    )
+                elif any(length <= 0 for length in channel.run_lengths):
+                    add(
+                        "invalid_rle_run_length",
+                        "RLE channel contains a non-positive run length",
+                        WadIssueSeverity.ERROR,
+                        group_index=group_index,
+                        target_id=chunk.bone_id.bone_id,
+                        track_id=chunk.bone_id.track_id,
+                    )
+                elif (
+                    group.frames_per_chunk > 0
+                    and sum(channel.run_lengths) != group.frames_per_chunk
+                ):
+                    add(
+                        "rle_frame_count",
+                        f"RLE runs cover {sum(channel.run_lengths)} samples; "
+                        f"the track group declares {group.frames_per_chunk}",
+                        WadIssueSeverity.ERROR,
+                        group_index=group_index,
+                        target_id=chunk.bone_id.bone_id,
+                        track_id=chunk.bone_id.track_id,
+                    )
         if current.keys() != reference.keys():
             missing = sorted(reference.keys() - current.keys())
             extra = sorted(current.keys() - reference.keys())
@@ -385,6 +434,7 @@ def audit_wad_document(
     track_kinds: Counter[str] = Counter()
     track_ids: Counter[int] = Counter()
     channel_types: Counter[str] = Counter()
+    unsupported_channel_types: set[str] = set()
     track_group_count = 0
     target_count = 0
     channel_count = 0
@@ -399,7 +449,9 @@ def audit_wad_document(
             for chunk in group.chunks:
                 for channel in chunk.channels:
                     channel_count += 1
-                    channel_types[channel.channel_type.name] += 1
+                    channel_types[channel.channel_type_name] += 1
+                    if not channel.is_supported:
+                        unsupported_channel_types.add(channel.channel_type_name)
 
     custom_track_ids = tuple(
         sorted(
@@ -417,6 +469,7 @@ def audit_wad_document(
         track_kinds=dict(sorted(track_kinds.items())),
         track_ids=dict(sorted(track_ids.items())),
         channel_types=dict(sorted(channel_types.items())),
+        unsupported_channel_types=tuple(sorted(unsupported_channel_types)),
         custom_track_ids=custom_track_ids,
         issues=validate_wad_document(document, skeleton=skeleton),
     )

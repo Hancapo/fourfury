@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import re
 import struct
+from bisect import bisect_right
 from dataclasses import dataclass, field
 from enum import IntEnum, IntFlag
 from pathlib import Path
@@ -106,6 +107,36 @@ class WadChannelType(IntEnum):
     QUADRATIC_BSPLINE = 18
     CUBIC_BSPLINE = 19
     STATIC_SMALLEST_THREE_QUATERNION = 20
+
+
+_SUPPORTED_WAD_CHANNEL_TYPES = frozenset(
+    {
+        WadChannelType.RAW_FLOAT,
+        WadChannelType.STATIC_FLOAT,
+        WadChannelType.QUANTIZED_FLOAT,
+        WadChannelType.RAW_INT,
+        WadChannelType.STATIC_QUATERNION,
+        WadChannelType.STATIC_INT,
+        WadChannelType.RLE_INT,
+        WadChannelType.STATIC_VECTOR3,
+    }
+)
+
+_VECTOR3_WAD_CHANNEL_TYPES = frozenset(
+    {
+        WadChannelType.VECTOR3,
+        WadChannelType.STATIC_VECTOR3,
+    }
+)
+
+_QUATERNION_WAD_CHANNEL_TYPES = frozenset(
+    {
+        WadChannelType.QUATERNION,
+        WadChannelType.STATIC_QUATERNION,
+        WadChannelType.SMALLEST_THREE_QUATERNION,
+        WadChannelType.STATIC_SMALLEST_THREE_QUATERNION,
+    }
+)
 
 
 class WadTrackType(IntEnum):
@@ -401,7 +432,7 @@ ChannelValue = Scalar | tuple[float, ...]
 
 @dataclass(frozen=True, slots=True, init=False, eq=False)
 class WadChannel:
-    channel_type: WadChannelType
+    channel_type: WadChannelType | int
     flags: int
     vector: tuple[float, ...] | None = None
     scale: float | None = None
@@ -411,8 +442,10 @@ class WadChannel:
     packed_sequence_words: tuple[int, ...] = ()
     packed_sequence_bit_count: int = 0
     packed_sequence_divisor: int = 0
+    header_bytes: bytes = field(default=b"", repr=False, compare=False)
     vft: int = field(default=0, repr=False, compare=False)
     pointer: int = field(default=0, repr=False, compare=False)
+    _run_ends: tuple[int, ...] = field(default=(), repr=False, compare=False)
     _values: tuple[Scalar, ...] = field(default=(), repr=False)
     _quantized_values: tuple[int, ...] = field(default=(), repr=False)
     _raw_data: bytes = field(default=b"", repr=False, compare=False)
@@ -424,7 +457,7 @@ class WadChannel:
 
     def __init__(
         self,
-        channel_type: WadChannelType,
+        channel_type: WadChannelType | int,
         flags: int,
         values: tuple[Scalar, ...] = (),
         vector: tuple[float, ...] | None = None,
@@ -439,6 +472,7 @@ class WadChannel:
         vft: int = 0,
         pointer: int = 0,
         *,
+        header_bytes: bytes = b"",
         _raw_data: bytes = b"",
         _raw_code: str = "",
         _raw_count: int = 0,
@@ -468,8 +502,15 @@ class WadChannel:
             "packed_sequence_divisor",
             packed_sequence_divisor,
         )
+        object.__setattr__(self, "header_bytes", bytes(header_bytes))
         object.__setattr__(self, "vft", vft)
         object.__setattr__(self, "pointer", pointer)
+        run_total = 0
+        run_ends: list[int] = []
+        for length in packed_sequence:
+            run_total += length
+            run_ends.append(run_total)
+        object.__setattr__(self, "_run_ends", tuple(run_ends))
         object.__setattr__(self, "_values", tuple(values))
         object.__setattr__(self, "_quantized_values", tuple(quantized_values))
         object.__setattr__(self, "_raw_data", _raw_data)
@@ -597,6 +638,36 @@ class WadChannel:
         }
 
     @property
+    def channel_type_value(self) -> int:
+        return int(self.channel_type)
+
+    @property
+    def channel_type_name(self) -> str:
+        if isinstance(self.channel_type, WadChannelType):
+            return self.channel_type.name
+        return f"UNKNOWN_{self.channel_type_value}"
+
+    @property
+    def is_supported(self) -> bool:
+        return self.channel_type in _SUPPORTED_WAD_CHANNEL_TYPES
+
+    @property
+    def component_count(self) -> int:
+        if self.vector is not None:
+            return len(self.vector)
+        if self.channel_type in _VECTOR3_WAD_CHANNEL_TYPES:
+            return 3
+        if self.channel_type in _QUATERNION_WAD_CHANNEL_TYPES:
+            return 4
+        return 1
+
+    @property
+    def run_lengths(self) -> tuple[int, ...]:
+        """Decoded frame count for each RLE integer value."""
+
+        return self.packed_sequence
+
+    @property
     def value(self) -> ChannelValue | tuple[Scalar, ...] | None:
         if self.vector is not None:
             return self.vector
@@ -607,10 +678,22 @@ class WadChannel:
     def value_at(self, frame: int) -> ChannelValue:
         if frame < 0:
             raise ValueError("WAD channel frame cannot be negative")
-        if self.channel_type == WadChannelType.RLE_INT:
+        if not self.is_supported:
             raise NotImplementedError(
-                "WAD RLE integer timing expansion is not currently implemented"
+                f"WAD channel type {self.channel_type_name} "
+                f"({self.channel_type_value}) cannot be evaluated"
             )
+        if self.channel_type == WadChannelType.RLE_INT:
+            if not self.run_values:
+                raise ValueError("WAD RLE integer channel has no values")
+            if len(self.run_values) != len(self.run_lengths):
+                raise ValueError(
+                    "WAD RLE integer value and run-length counts do not match"
+                )
+            if any(length <= 0 for length in self.run_lengths):
+                raise ValueError("WAD RLE integer run lengths must be positive")
+            run_index = bisect_right(self._run_ends, frame)
+            return self.run_values[min(run_index, len(self.run_values) - 1)]
         if self.vector is not None:
             return self.vector
         if self._raw_data:
@@ -643,10 +726,7 @@ class WadChunk:
 
     @property
     def component_count(self) -> int:
-        count = 0
-        for channel in self.channels:
-            count += len(channel.vector) if channel.vector is not None else 1
-        return count
+        return sum(channel.component_count for channel in self.channels)
 
     def value_at(self, frame: int) -> AnimationValue:
         """Evaluate the serialized components without coercing integers to floats."""
@@ -1624,15 +1704,9 @@ class _WadReader:
         cached = self._channels.get(pointer)
         if cached is not None:
             return cached
-        vft, flags, type_value, _padding = self.unpack(
-            pointer,
-            "<IBBH",
-            "WAD animation channel",
-        )
-        try:
-            channel_type = WadChannelType(type_value)
-        except ValueError as exc:
-            raise ValueError(f"unsupported WAD animation channel type: {type_value}") from exc
+        raw_header = self.read(pointer, WAD_CHANNEL_HEADER_SIZE, "WAD animation channel")
+        vft, flags, type_value, _padding = struct.unpack("<IBBH", raw_header)
+        channel_type = WadChannelType._value2member_map_.get(type_value, type_value)
 
         values: tuple[Scalar, ...] = ()
         vector: tuple[float, ...] | None = None
@@ -1665,7 +1739,7 @@ class _WadReader:
             raw_code = "f" if channel_type == WadChannelType.RAW_FLOAT else "i"
             data_pointer, raw_count = self.array_header(
                 pointer + 8,
-                f"WAD {channel_type.name} values",
+                f"WAD {WadChannelType(type_value).name} values",
             )
             raw_data = (
                 b""
@@ -1673,7 +1747,7 @@ class _WadReader:
                 else self.read(
                     data_pointer,
                     raw_count * 4,
-                    f"WAD {channel_type.name} values",
+                    f"WAD {WadChannelType(type_value).name} values",
                 )
             )
         elif channel_type == WadChannelType.QUANTIZED_FLOAT:
@@ -1713,22 +1787,15 @@ class _WadReader:
                 if word_count
                 else ()
             )
-            # The packed sequence contains one signed transition code between
-            # adjacent values. GTA IV's runtime expansion of those codes is not
-            # yet understood well enough to present it as frame values.
             packed_sequence = self._decode_packed_sequence(
                 words,
                 sequence_bits,
                 divisor,
-                max(0, len(run_values) - 1),
+                len(run_values),
             )
             packed_sequence_words = words
             packed_sequence_bit_count = sequence_bits
             packed_sequence_divisor = divisor
-        else:
-            raise ValueError(
-                f"WAD animation channel type {channel_type.name} is not implemented"
-            )
 
         channel = WadChannel(
             channel_type,
@@ -1745,6 +1812,7 @@ class _WadReader:
             packed_sequence_divisor,
             vft,
             pointer,
+            header_bytes=raw_header,
             _raw_data=raw_data,
             _raw_code=raw_code,
             _raw_count=raw_count,
@@ -1775,12 +1843,12 @@ class _WadReader:
         result: list[int] = []
         for _ in range(count):
             try:
-                remainder = 0
-                for bit in range(divisor):
-                    remainder |= get_bit() << bit
                 quotient = 0
                 while get_bit() == 0:
                     quotient += 1
+                remainder = 0
+                for bit in range(divisor):
+                    remainder |= get_bit() << bit
                 value = (quotient << divisor) | remainder
                 if value and get_bit():
                     value = -value
