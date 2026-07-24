@@ -2,12 +2,50 @@ from __future__ import annotations
 
 import csv
 from dataclasses import dataclass, field
+from enum import IntFlag
 from pathlib import Path
 from typing import BinaryIO, Iterator, Literal
 
 from ._utils import atomic_write
 
 IdeLineKind = Literal["blank", "comment", "section", "end", "raw"]
+IDE_ARCHETYPE_SECTIONS = frozenset({"objs", "tobj", "anim", "tanm"})
+
+
+class IdeArchetypeFlags(IntFlag):
+    NONE = 0
+    RESERVED_01 = 1 << 0
+    RESERVED_02 = 1 << 1
+    ALPHA = 1 << 2
+    RESERVED_04 = 1 << 3
+    RESERVED_05 = 1 << 4
+    TREE = 1 << 5
+    RESERVED_07 = 1 << 6
+    INSTANCE = 1 << 7
+    RESERVED_09 = 1 << 8
+    HAS_ANIMATION = 1 << 9
+    HAS_UV_ANIMATION = 1 << 10
+    SHADOW_ONLY = 1 << 11
+    RESERVED_13 = 1 << 12
+    DONT_CAST_SHADOWS = 1 << 13
+    RESERVED_15 = 1 << 14
+    RESERVED_16 = 1 << 15
+    RESERVED_17 = 1 << 16
+    DYNAMIC = 1 << 17
+    RESERVED_19 = 1 << 18
+    RESERVED_20 = 1 << 19
+    RESERVED_21 = 1 << 20
+    NO_BACKFACE_CULL = 1 << 21
+    RESERVED_23 = 1 << 22
+    RESERVED_24 = 1 << 23
+    RESERVED_25 = 1 << 24
+    RESERVED_26 = 1 << 25
+    ENABLE_SPECIAL = 1 << 26
+    RESERVED_28 = 1 << 27
+    RESERVED_29 = 1 << 28
+    RESERVED_30 = 1 << 29
+    RESERVED_31 = 1 << 30
+    RESERVED_32 = 1 << 31
 
 
 @dataclass(slots=True)
@@ -55,6 +93,96 @@ class IdeEntry:
 
     def get_float(self, index: int) -> float:
         return float(self.values[index])
+
+
+@dataclass(slots=True)
+class IdeArchetype:
+    """Typed, editable view over an IDE archetype entry."""
+
+    entry: IdeEntry = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if self.entry.section.casefold() not in IDE_ARCHETYPE_SECTIONS:
+            raise ValueError(f"IDE section is not an archetype section: {self.entry.section!r}")
+        if len(self.entry.values) <= self._flags_index:
+            raise ValueError(
+                f"IDE {self.entry.section} archetype requires at least "
+                f"{self._flags_index + 1} values"
+            )
+
+    @property
+    def _is_animated(self) -> bool:
+        return self.entry.section.casefold() in {"anim", "tanm"}
+
+    @property
+    def _flags_index(self) -> int:
+        return 4 if self._is_animated else 3
+
+    @property
+    def name(self) -> str:
+        return self.entry.values[0]
+
+    @name.setter
+    def name(self, value: str) -> None:
+        self.entry.values[0] = value
+
+    @property
+    def texture_dictionary(self) -> str:
+        return self.entry.values[1]
+
+    @texture_dictionary.setter
+    def texture_dictionary(self, value: str) -> None:
+        self.entry.values[1] = value
+
+    @property
+    def animation_dictionary(self) -> str | None:
+        return self.entry.values[2] if self._is_animated else None
+
+    @animation_dictionary.setter
+    def animation_dictionary(self, value: str | None) -> None:
+        if not self._is_animated:
+            if value is not None:
+                raise ValueError("static IDE archetypes do not have an animation dictionary")
+            return
+        if value is None:
+            raise ValueError("animated IDE archetypes require an animation dictionary")
+        self.entry.values[2] = value
+
+    @property
+    def draw_distance(self) -> float:
+        return float(self.entry.values[3 if self._is_animated else 2])
+
+    @draw_distance.setter
+    def draw_distance(self, value: float) -> None:
+        self.entry.values[3 if self._is_animated else 2] = str(float(value))
+
+    @property
+    def flags(self) -> IdeArchetypeFlags:
+        return IdeArchetypeFlags(int(self.entry.values[self._flags_index], 0))
+
+    @flags.setter
+    def flags(self, value: IdeArchetypeFlags | int) -> None:
+        self.entry.values[self._flags_index] = str(int(value))
+
+    @property
+    def has_animation(self) -> bool:
+        return bool(self.flags & IdeArchetypeFlags.HAS_ANIMATION)
+
+    @property
+    def has_uv_animation(self) -> bool:
+        return bool(self.flags & IdeArchetypeFlags.HAS_UV_ANIMATION)
+
+    @property
+    def uv_animation_dictionary(self) -> str | None:
+        return self.animation_dictionary if self.has_uv_animation else None
+
+    @property
+    def time_flags(self) -> int | None:
+        if self.entry.section.casefold() == "tobj" and len(self.entry.values) > 16:
+            return int(self.entry.values[16], 0)
+        if self.entry.section.casefold() == "tanm" and len(self.entry.values) > 17:
+            return int(self.entry.values[17], 0)
+        return None
 
 
 @dataclass(slots=True)
@@ -140,6 +268,33 @@ class IdeDocument:
     def get_entries(self, section: str) -> list[IdeEntry]:
         return list(self.iter_entries(section))
 
+    def iter_archetypes(self, section: str | None = None) -> Iterator[IdeArchetype]:
+        key = section.casefold() if section is not None else None
+        if key is not None and key not in IDE_ARCHETYPE_SECTIONS:
+            raise ValueError(f"IDE section is not an archetype section: {section!r}")
+        for entry in self.iter_entries(key):
+            if entry.section.casefold() in IDE_ARCHETYPE_SECTIONS:
+                yield IdeArchetype(entry)
+
+    @property
+    def archetypes(self) -> tuple[IdeArchetype, ...]:
+        return tuple(self.iter_archetypes())
+
+    @property
+    def uv_animated_archetypes(self) -> tuple[IdeArchetype, ...]:
+        return tuple(archetype for archetype in self.iter_archetypes() if archetype.has_uv_animation)
+
+    def find_archetype(self, name: str) -> IdeArchetype | None:
+        key = name.casefold()
+        return next(
+            (
+                archetype
+                for archetype in self.iter_archetypes()
+                if archetype.name.casefold() == key
+            ),
+            None,
+        )
+
     def add_section(self, name: str) -> None:
         key = name.strip().casefold()
         if not key or any(existing.casefold() == key for existing in self.section_names):
@@ -198,4 +353,14 @@ def create_ide(name: str = "definitions.ide") -> IdeDocument:
     return IdeDocument.empty(name)
 
 
-__all__ = ["IdeDocument", "IdeEntry", "IdeLine", "IdeLineKind", "create_ide", "load_ide"]
+__all__ = [
+    "IDE_ARCHETYPE_SECTIONS",
+    "IdeArchetype",
+    "IdeArchetypeFlags",
+    "IdeDocument",
+    "IdeEntry",
+    "IdeLine",
+    "IdeLineKind",
+    "create_ide",
+    "load_ide",
+]

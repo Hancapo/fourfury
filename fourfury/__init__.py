@@ -16,7 +16,16 @@ from .gtxd import (
     load_gtxd,
 )
 from .img import IMG3_ENTRY_SIZE, IMG3_MAGIC, IMG3_VERSION, ImgArchive, ImgEntry, create_img, load_img
-from .ide import IdeDocument, IdeEntry, IdeLine, create_ide, load_ide
+from .ide import (
+    IDE_ARCHETYPE_SECTIONS,
+    IdeArchetype,
+    IdeArchetypeFlags,
+    IdeDocument,
+    IdeEntry,
+    IdeLine,
+    create_ide,
+    load_ide,
+)
 from .ipl import IplDocument, IplOccluder, create_ipl, load_ipl
 from .materials import WbnMaterialType
 from .model import (
@@ -308,7 +317,8 @@ __version__ = "0.1.0"
 __all__ = [
     "GTAIVCrypto", "GTAIV_AES_KEY", "GTAIV_KEY_SHA1", "GTXD_SECTION", "GtxdDependency",
     "GtxdDocument", "GtxdHierarchy", "IMG3_ENTRY_SIZE", "IMG3_MAGIC",
-    "IMG3_VERSION", "IdeDocument", "IdeEntry", "IdeLine", "ImgArchive", "ImgEntry",
+    "IMG3_VERSION", "IDE_ARCHETYPE_SECTIONS", "IdeArchetype", "IdeArchetypeFlags",
+    "IdeDocument", "IdeEntry", "IdeLine", "ImgArchive", "ImgEntry",
     "IplDocument", "IplOccluder",
     "ModelAabb", "ModelAsset", "ModelBone", "ModelBoundingSphere",
     "ModelColor", "ModelColorChannel", "ModelCoordinateSystem", "ModelLight",

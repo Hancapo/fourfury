@@ -447,6 +447,26 @@ class WdrTests(unittest.TestCase):
         self.assertEqual(unknown.name, "hash_deadbeef")
         self.assertEqual(document.unknown_shaders, (shader,))
 
+    def test_exposes_default_uv_animation_rows_as_a_neutral_transform(self) -> None:
+        shader = WdrDocument.from_bytes(_sample_wdr()).shaders[0]
+        shader.parameters += (
+            WdrShaderParameter(
+                0xD79BFC1E,
+                1,
+                value=WdrVector4(1.0, 0.0, 0.25, 0.0),
+            ),
+            WdrShaderParameter(
+                0xBA54C190,
+                1,
+                value=WdrVector4(0.0, 1.0, -0.5, 0.0),
+            ),
+        )
+
+        self.assertTrue(shader.has_uv_transform_parameters)
+        transform = shader.uv_transform
+        assert transform is not None
+        self.assertEqual(transform.apply((0.5, 0.75)), (0.75, 0.25))
+
     def test_rejects_other_rsc5_resource_versions(self) -> None:
         source = bytearray(_sample_wdr())
         struct.pack_into("<I", source, 4, 0x20)
