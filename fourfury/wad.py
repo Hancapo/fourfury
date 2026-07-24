@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import BinaryIO, Iterator
 
 from ._utils import atomic_write
+from .animation import UvAnimationClip, UvAnimationFrame, UvTransform
 from .rsc import (
     RSC5_PHYSICAL_BASE,
     RSC5_VIRTUAL_BASE,
@@ -396,6 +397,17 @@ class WadTrack:
                 return chunk
         return None
 
+    def find_track_chunk(self, track_id: int | WadTrackId) -> WadChunk | None:
+        track_value = int(track_id)
+        return next(
+            (
+                chunk
+                for chunk in self.chunks
+                if chunk.bone_id.track_id == track_value
+            ),
+            None,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class WadAnimation:
@@ -505,6 +517,64 @@ class WadAnimation:
         return tuple(
             start + ((end - start) * alpha) for start, end in zip(value0, value1, strict=True)
         )  # type: ignore[return-value]
+
+    def uv_transform_at(self, frame: int) -> UvTransform:
+        """Evaluate the two UV matrix-row tracks at an integer frame."""
+
+        if not self.tracks:
+            raise ValueError("WAD animation has no track groups")
+        if frame < 0:
+            raise ValueError("WAD animation frame cannot be negative")
+        if self.frame_count:
+            frame = min(frame, self.frame_count - 1)
+        frames_per_chunk = self.frames_per_chunk or self.tracks[0].frames_per_chunk
+        if frames_per_chunk <= 0:
+            raise ValueError("WAD animation has no valid frames-per-chunk value")
+        group_index = min(frame // frames_per_chunk, len(self.tracks) - 1)
+        group = self.tracks[group_index]
+        local_frame = frame % frames_per_chunk
+        row_u_chunk = group.find_track_chunk(WadTrackId.SHADER_SLIDE_U)
+        row_v_chunk = group.find_track_chunk(WadTrackId.SHADER_SLIDE_V)
+        if row_u_chunk is None and row_v_chunk is None:
+            raise ValueError("WAD animation has no UV matrix-row tracks")
+        row_u = (
+            UvTransform.identity().row_u
+            if row_u_chunk is None
+            else row_u_chunk.vector_at(local_frame)
+        )
+        row_v = (
+            UvTransform.identity().row_v
+            if row_v_chunk is None
+            else row_v_chunk.vector_at(local_frame)
+        )
+        return UvTransform(row_u, row_v)
+
+    def to_uv_animation(self, *, material_index: int | None = None) -> UvAnimationClip:
+        """Project this WAD animation into the target-independent UV contract."""
+
+        target_index = self.uv_material_index if material_index is None else material_index
+        if target_index is None:
+            raise ValueError(
+                "WAD UV animation needs an explicit material index or a _uv_<index> suffix"
+            )
+        if target_index < 0:
+            raise ValueError("WAD UV material index cannot be negative")
+        count = max(self.frame_count, 1)
+        if count == 1 or self.duration <= 0.0:
+            times = (0.0,)
+        else:
+            times = tuple((index / (count - 1)) * self.duration for index in range(count))
+        frames = tuple(
+            UvAnimationFrame(time, self.uv_transform_at(index))
+            for index, time in enumerate(times)
+        )
+        return UvAnimationClip(
+            name=self.uv_base_name or self.short_name,
+            target_index=target_index,
+            duration=max(self.duration, 0.0),
+            looping=bool(self.flags & WadAnimationFlags.LOOPED),
+            frames=frames,
+        )
 
 
 @dataclass(frozen=True, slots=True)

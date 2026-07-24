@@ -360,6 +360,23 @@ representation used by the runtime. Animations named with the established
 `name_uv_<material-index>` convention expose `is_uv_animation`,
 `uv_material_index`, and `uv_base_name`.
 
+`to_uv_animation()` projects the two `SHADER_SLIDE_U` and `SHADER_SLIDE_V`
+matrix-row tracks into a format-neutral `UvAnimationClip`. The result contains
+ordered `UvAnimationFrame` objects, supports interpolation through `sample()`,
+can transform coordinates with `UvTransform.apply()`, and exports only primitive
+data through `to_data()`:
+
+```python
+uv_clip = wad["television_uv_2"].animation.to_uv_animation()
+transform = uv_clip.sample(0.5)
+animated_uv = transform.apply((0.25, 0.75))
+converter_data = uv_clip.to_data()
+```
+
+This follows the OAD exporter layout: UV row 0 is `(1, 0, u_offset, 0)` and UV
+row 1 is `(0, 1, v_offset, 0)`. Missing individual rows use their identity
+value, while animations with neither row are rejected explicitly.
+
 Static float, integer, vector, and quaternion channels are decoded. Raw float
 and integer arrays and packed quantized floats are also materialized, so
 `vector_at()` and `sample()` can evaluate normal transform tracks without a game

@@ -1,3 +1,11 @@
+from .animation import (
+    UvAnimationClip,
+    UvAnimationFrame,
+    UvMatrix3,
+    UvTransform,
+    UvVector2,
+    UvVector4,
+)
 from .crypto import GTAIVCrypto, GTAIV_AES_KEY, GTAIV_KEY_SHA1, extract_aes_key
 from .gtxd import (
     GTXD_SECTION,
@@ -321,6 +329,8 @@ __all__ = [
     "RSC5_VIRTUAL_BASE", "RpfArchive",
     "RpfDirectoryEntry", "RpfEntry", "RpfFileEntry", "Rsc5Resource", "Rsc5Texture",
     "Rsc5TextureDictionary", "Rsc5TextureFormat", "WBN_BOUND_SIZE",
+    "UvAnimationClip", "UvAnimationFrame", "UvMatrix3", "UvTransform", "UvVector2",
+    "UvVector4",
     "WAD_ANIMATION_SIZE", "WAD_CHANNEL_HEADER_SIZE", "WAD_CHUNK_SIZE",
     "WAD_DICTIONARY_SIZE", "WAD_RESOURCE_VERSION", "WAD_TRACK_SIZE",
     "WadAnimation", "WadAnimationFlags", "WadBoneId", "WadBoneName",

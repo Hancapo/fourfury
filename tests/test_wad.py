@@ -159,6 +159,43 @@ def _sample_wad(*, hash_count: int = 1, animation_count: int = 1) -> bytes:
     )
 
 
+def _sample_uv_wad() -> bytes:
+    source = _sample_wad()
+    virtual = bytearray(zlib.decompress(source[12:]))
+    struct.pack_into("<I", virtual, 0x100, joaat("television_uv_2"))
+    virtual[0x180:0x200] = b"\0" * 0x80
+    name = b"pack:/television_uv_2.anim\0"
+    virtual[0x180 : 0x180 + len(name)] = name
+    struct.pack_into("<BBH", virtual, 0x300, WadTrackId.SHADER_SLIDE_U, 0, 0)
+    struct.pack_into("<BBH", virtual, 0x320, WadTrackId.SHADER_SLIDE_V, 0, 0)
+    struct.pack_into("<3f", virtual, 0x700, 1.0, 1.0, 1.0)
+    struct.pack_into(
+        "<IBBHf",
+        virtual,
+        0x430,
+        0x6AF77C,
+        0,
+        WadChannelType.STATIC_FLOAT,
+        0,
+        0.0,
+    )
+    struct.pack_into(
+        "<IBBHIHH",
+        virtual,
+        0x460,
+        0x6AF92C,
+        0,
+        WadChannelType.RAW_FLOAT,
+        0,
+        _pointer(0x820),
+        3,
+        3,
+    )
+    struct.pack_into("<3f", virtual, 0x820, 0.0, 1.0, 2.0)
+    struct.pack_into("<4f", virtual, 0x780, 0.0, 1.0, 0.0, 0.0)
+    return source[:12] + zlib.compress(virtual)
+
+
 class WadTests(unittest.TestCase):
     def test_reads_dictionary_animation_tracks_and_channels(self) -> None:
         document = WadDocument.from_bytes(_sample_wad(), name="sample.wad")
@@ -250,6 +287,30 @@ class WadTests(unittest.TestCase):
         self.assertTrue(animation.is_uv_animation)
         self.assertEqual(animation.uv_material_index, 12)
         self.assertEqual(animation.uv_base_name, "television")
+
+    def test_projects_uv_rows_into_the_neutral_animation_contract(self) -> None:
+        animation = WadDocument.from_bytes(_sample_uv_wad()).animations[0]
+
+        clip = animation.to_uv_animation()
+
+        self.assertEqual(clip.name, "television")
+        self.assertEqual(clip.target_index, 2)
+        self.assertEqual(clip.frame_count, 3)
+        self.assertEqual(clip.frames[0].transform.row_u, (1.0, 0.0, 0.0, 0.0))
+        self.assertEqual(clip.frames[2].transform.row_u, (1.0, 0.0, 2.0, 0.0))
+        self.assertEqual(clip.frames[2].transform.row_v, (0.0, 1.0, 0.0, 0.0))
+        sampled_uv = clip.sample(1.0 / 60.0).apply((0.25, 0.75))
+        self.assertAlmostEqual(sampled_uv[0], 0.75)
+        self.assertAlmostEqual(sampled_uv[1], 0.75)
+        self.assertEqual(clip.to_data()["name"], "television")
+
+    def test_uv_projection_requires_rows_and_a_target_index(self) -> None:
+        animation = WadDocument.from_bytes(_sample_wad()).animations[0]
+
+        with self.assertRaisesRegex(ValueError, "material index"):
+            animation.to_uv_animation()
+        with self.assertRaisesRegex(ValueError, "no UV matrix-row tracks"):
+            animation.to_uv_animation(material_index=0)
 
     def test_loads_stream_and_preserves_resource_losslessly(self) -> None:
         source = _sample_wad()
