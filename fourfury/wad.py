@@ -9,7 +9,12 @@ from pathlib import Path
 from typing import BinaryIO, Iterator
 
 from ._utils import atomic_write
-from .animation import UvAnimationClip, UvAnimationFrame, UvTransform
+from .animation import (
+    UvAnimationClip,
+    UvAnimationFrame,
+    UvTransform,
+    interpolate_quaternion,
+)
 from .rsc import (
     RSC5_PHYSICAL_BASE,
     RSC5_VIRTUAL_BASE,
@@ -132,6 +137,23 @@ class WadTrackId(IntEnum):
     CAMERA_LIMIT = 53
 
 
+WAD_BONE_TRANSFORM_TRACKS = frozenset(
+    {
+        WadTrackId.BONE_TRANSLATION,
+        WadTrackId.BONE_ROTATION,
+        WadTrackId.BONE_SCALE,
+    }
+)
+WAD_MOVER_TRANSFORM_TRACKS = frozenset(
+    {
+        WadTrackId.MOVER_TRANSLATION,
+        WadTrackId.MOVER_ROTATION,
+        WadTrackId.MOVER_SCALE,
+    }
+)
+WAD_SKELETAL_TRACKS = WAD_BONE_TRANSFORM_TRACKS | WAD_MOVER_TRANSFORM_TRACKS
+
+
 class WadBoneName(IntEnum):
     CHAR = 0
     HUB_LF = 42
@@ -242,6 +264,15 @@ class WadBoneId:
         return self.type_id == 0xFF
 
     @property
+    def target_key(self) -> tuple[int, int]:
+        """Logical target shared by equivalent chunks with different encodings."""
+
+        return (self.bone_id, self.track_id & 0x7F)
+
+    def targets(self, other: WadBoneId) -> bool:
+        return self.target_key == other.target_key
+
+    @property
     def uv_index(self) -> int | None:
         """Return the material/UV target index encoded in this identifier."""
 
@@ -280,6 +311,25 @@ class WadBoneId:
         track = self.track
         name = track.name if track is not None else f"TRACK_{self.track_id & 0x7F}"
         return f"ACTION_FLAGS|{name}" if self.action_flags else name
+
+    @property
+    def is_bone_transform(self) -> bool:
+        return self.track in WAD_BONE_TRANSFORM_TRACKS
+
+    @property
+    def is_mover_transform(self) -> bool:
+        return self.track in WAD_MOVER_TRANSFORM_TRACKS
+
+    @property
+    def is_skeletal_transform(self) -> bool:
+        return self.track in WAD_SKELETAL_TRACKS and not self.is_uv_channel
+
+    @property
+    def is_rotation(self) -> bool:
+        return self.track in {
+            WadTrackId.BONE_ROTATION,
+            WadTrackId.MOVER_ROTATION,
+        }
 
     @property
     def bone(self) -> WadBoneName | None:
@@ -455,6 +505,24 @@ class WadAnimation:
     def bone_ids(self) -> tuple[WadBoneId, ...]:
         return () if not self.tracks else tuple(chunk.bone_id for chunk in self.tracks[0].chunks)
 
+    @property
+    def skeletal_tracks(self) -> tuple[WadBoneId, ...]:
+        """Logical skeletal targets, independent of per-block channel encoding."""
+
+        if not self.tracks:
+            return ()
+        unique: dict[tuple[int, int], WadBoneId] = {}
+        for group in self.tracks:
+            for chunk in group.chunks:
+                identifier = chunk.bone_id
+                if identifier.is_skeletal_transform:
+                    unique.setdefault(identifier.target_key, identifier)
+        return tuple(unique.values())
+
+    @property
+    def skeletal_bone_ids(self) -> tuple[int, ...]:
+        return tuple(dict.fromkeys(item.bone_id for item in self.skeletal_tracks))
+
     def find_bone(
         self,
         bone_id: int,
@@ -514,6 +582,9 @@ class WadAnimation:
         alpha = frame - frame0
         value0 = self.vector_at(frame0, bone_id, track_id)
         value1 = self.vector_at(frame1, bone_id, track_id)
+        identifier = self.find_bone(bone_id, track_id)
+        if identifier is not None and identifier.track_type is WadTrackType.QUATERNION:
+            return interpolate_quaternion(value0, value1, alpha)
         return tuple(
             start + ((end - start) * alpha) for start, end in zip(value0, value1, strict=True)
         )  # type: ignore[return-value]
@@ -951,10 +1022,13 @@ def load_wad(source: str | Path | bytes | BinaryIO) -> WadDocument:
 
 __all__ = [
     "WAD_ANIMATION_SIZE",
+    "WAD_BONE_TRANSFORM_TRACKS",
     "WAD_CHANNEL_HEADER_SIZE",
     "WAD_CHUNK_SIZE",
     "WAD_DICTIONARY_SIZE",
+    "WAD_MOVER_TRANSFORM_TRACKS",
     "WAD_RESOURCE_VERSION",
+    "WAD_SKELETAL_TRACKS",
     "WAD_TRACK_SIZE",
     "WadAnimation",
     "WadAnimationFlags",

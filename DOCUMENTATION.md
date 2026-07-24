@@ -371,6 +371,14 @@ representation used by the runtime. Animations named with the established
 `name_uv_<material-index>` convention expose `is_uv_animation`,
 `uv_material_index`, and `uv_base_name`.
 
+Skeletal targets use `WadBoneId.target_key` to identify the logical
+`(bone_id, track_id)` independently from the channel encoding stored in each
+chunk group. `is_bone_transform`, `is_mover_transform`, and
+`is_skeletal_transform` separate ordinary bone transforms from root-motion
+tracks. `WadAnimation.skeletal_tracks` returns the stable target set, while
+`sample()` normalizes quaternion tracks and interpolates them over the shortest
+path.
+
 `to_uv_animation()` projects the two `SHADER_SLIDE_U` and `SHADER_SLIDE_V`
 matrix-row tracks into a format-neutral `UvAnimationClip`. The result contains
 ordered `UvAnimationFrame` objects, supports interpolation through `sample()`,
