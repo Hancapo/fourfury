@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from bisect import bisect_right
 from dataclasses import dataclass, field
+from enum import StrEnum
 from operator import attrgetter
 from typing import TypeAlias
 
 
+AnimationScalar: TypeAlias = float | int
+AnimationValue: TypeAlias = AnimationScalar | tuple[AnimationScalar, ...]
 UvVector2: TypeAlias = tuple[float, float]
 UvVector4: TypeAlias = tuple[float, float, float, float]
 Vector3: TypeAlias = tuple[float, float, float]
@@ -40,6 +43,254 @@ UvMatrix3: TypeAlias = tuple[
     float,
 ]
 _FRAME_TIME = attrgetter("time")
+
+
+class AnimationTrackInterpolation(StrEnum):
+    """Format-neutral interpolation applied to one logical animation track."""
+
+    STEP = "step"
+    LINEAR = "linear"
+    QUATERNION = "quaternion"
+
+
+@dataclass(frozen=True, slots=True)
+class AnimationTrackTarget:
+    """Logical animation target independent of its source chunk encoding."""
+
+    target_id: int
+    track_id: int
+    component_count: int
+    interpolation: AnimationTrackInterpolation
+    target_name: str | None = None
+    track_name: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.target_id < 0:
+            raise ValueError("animation target ID cannot be negative")
+        if self.track_id < 0:
+            raise ValueError("animation track ID cannot be negative")
+        if self.component_count <= 0:
+            raise ValueError("animation track component count must be positive")
+        if (
+            self.interpolation is AnimationTrackInterpolation.QUATERNION
+            and self.component_count != 4
+        ):
+            raise ValueError("quaternion animation tracks must have four components")
+
+    @property
+    def key(self) -> tuple[int, int]:
+        return (self.target_id, self.track_id)
+
+    def to_data(self) -> dict[str, object]:
+        return {
+            "target_id": self.target_id,
+            "track_id": self.track_id,
+            "component_count": self.component_count,
+            "interpolation": self.interpolation.value,
+            "target_name": self.target_name,
+            "track_name": self.track_name,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AnimationTrackValue:
+    target: AnimationTrackTarget
+    value: AnimationValue
+
+    def __post_init__(self) -> None:
+        count = len(self.value) if isinstance(self.value, tuple) else 1
+        if count != self.target.component_count:
+            raise ValueError(
+                f"animation track {self.target.key} expects "
+                f"{self.target.component_count} components, received {count}"
+            )
+
+    @property
+    def key(self) -> tuple[int, int]:
+        return self.target.key
+
+    def interpolate(
+        self,
+        other: AnimationTrackValue,
+        alpha: float,
+    ) -> AnimationTrackValue:
+        if self.target != other.target:
+            raise ValueError("cannot interpolate different animation track targets")
+        if not 0.0 <= alpha <= 1.0:
+            raise ValueError("animation track interpolation alpha must be between zero and one")
+        interpolation = self.target.interpolation
+        if interpolation is AnimationTrackInterpolation.STEP:
+            return self
+        if interpolation is AnimationTrackInterpolation.QUATERNION:
+            if not isinstance(self.value, tuple) or not isinstance(other.value, tuple):
+                raise ValueError("quaternion animation track values must be tuples")
+            value = interpolate_quaternion(
+                tuple(float(item) for item in self.value),  # type: ignore[arg-type]
+                tuple(float(item) for item in other.value),  # type: ignore[arg-type]
+                alpha,
+            )
+            return AnimationTrackValue(self.target, value)
+        if isinstance(self.value, tuple):
+            if not isinstance(other.value, tuple):
+                raise ValueError("animation track value shapes do not match")
+            value = tuple(
+                float(start) + ((float(end) - float(start)) * alpha)
+                for start, end in zip(self.value, other.value, strict=True)
+            )
+        else:
+            if isinstance(other.value, tuple):
+                raise ValueError("animation track value shapes do not match")
+            value = float(self.value) + ((float(other.value) - float(self.value)) * alpha)
+        return AnimationTrackValue(self.target, value)
+
+    def to_data(self) -> dict[str, object]:
+        return {
+            "target_id": self.target.target_id,
+            "track_id": self.target.track_id,
+            "value": list(self.value) if isinstance(self.value, tuple) else self.value,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AnimationTrackFrame:
+    """Sparse values for every logical track present at one animation time."""
+
+    time: float
+    values: tuple[AnimationTrackValue, ...]
+    _values_by_key: dict[tuple[int, int], AnimationTrackValue] = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+
+    def __post_init__(self) -> None:
+        if self.time < 0.0:
+            raise ValueError("animation track frame time cannot be negative")
+        index = {item.key: item for item in self.values}
+        if len(index) != len(self.values):
+            raise ValueError("animation track frame contains duplicate targets")
+        object.__setattr__(self, "_values_by_key", index)
+
+    def get(
+        self,
+        target_id: int,
+        track_id: int,
+    ) -> AnimationTrackValue | None:
+        return self._values_by_key.get((int(target_id), int(track_id)))
+
+    def interpolate(
+        self,
+        other: AnimationTrackFrame,
+        alpha: float,
+    ) -> AnimationTrackFrame:
+        if not 0.0 <= alpha <= 1.0:
+            raise ValueError("animation frame interpolation alpha must be between zero and one")
+        values: list[AnimationTrackValue] = []
+        keys = tuple(dict.fromkeys((*self._values_by_key, *other._values_by_key)))
+        for key in keys:
+            start = self._values_by_key.get(key)
+            end = other._values_by_key.get(key)
+            if start is None:
+                assert end is not None
+                values.append(end)
+            elif end is None:
+                values.append(start)
+            else:
+                values.append(start.interpolate(end, alpha))
+        return AnimationTrackFrame(
+            self.time + ((other.time - self.time) * alpha),
+            tuple(values),
+        )
+
+    def to_data(self) -> dict[str, object]:
+        return {
+            "time": self.time,
+            "values": [item.to_data() for item in self.values],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class TrackAnimationClip:
+    """Format-neutral animation containing arbitrary logical tracks."""
+
+    name: str
+    duration: float
+    looping: bool
+    targets: tuple[AnimationTrackTarget, ...]
+    frames: tuple[AnimationTrackFrame, ...]
+    signature: int = 0
+    _targets_by_key: dict[tuple[int, int], AnimationTrackTarget] = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+
+    def __post_init__(self) -> None:
+        if self.duration < 0.0:
+            raise ValueError("track animation duration cannot be negative")
+        if not self.frames:
+            raise ValueError("track animation must contain at least one frame")
+        targets = {target.key: target for target in self.targets}
+        if len(targets) != len(self.targets):
+            raise ValueError("track animation contains duplicate targets")
+        previous = -1.0
+        for frame in self.frames:
+            if frame.time < previous:
+                raise ValueError("track animation frames must be ordered")
+            if frame.time > self.duration:
+                raise ValueError("track animation frame time exceeds its duration")
+            unknown = frame._values_by_key.keys() - targets.keys()
+            if unknown:
+                raise ValueError(f"track animation frame contains unknown targets: {unknown}")
+            previous = frame.time
+        object.__setattr__(self, "_targets_by_key", targets)
+
+    @property
+    def frame_count(self) -> int:
+        return len(self.frames)
+
+    def get_target(
+        self,
+        target_id: int,
+        track_id: int,
+    ) -> AnimationTrackTarget | None:
+        return self._targets_by_key.get((int(target_id), int(track_id)))
+
+    def sample(
+        self,
+        time: float,
+        *,
+        loop: bool | None = None,
+    ) -> AnimationTrackFrame:
+        if time < 0.0:
+            raise ValueError("track animation time cannot be negative")
+        if len(self.frames) == 1 or self.duration <= 0.0:
+            return self.frames[0]
+        should_loop = self.looping if loop is None else loop
+        if should_loop:
+            time %= self.duration
+        else:
+            time = min(time, self.duration)
+        upper = bisect_right(self.frames, time, key=_FRAME_TIME)
+        if upper == 0:
+            return self.frames[0]
+        if upper >= len(self.frames):
+            return self.frames[-1]
+        frame0 = self.frames[upper - 1]
+        frame1 = self.frames[upper]
+        span = frame1.time - frame0.time
+        alpha = 0.0 if span <= 0.0 else (time - frame0.time) / span
+        return frame0.interpolate(frame1, alpha)
+
+    def to_data(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "duration": self.duration,
+            "looping": self.looping,
+            "signature": self.signature,
+            "targets": [target.to_data() for target in self.targets],
+            "frames": [frame.to_data() for frame in self.frames],
+        }
 
 
 def normalize_quaternion(value: Quaternion) -> Quaternion:
@@ -511,6 +762,12 @@ class UvAnimationClip:
 
 
 __all__ = [
+    "AnimationScalar",
+    "AnimationTrackFrame",
+    "AnimationTrackInterpolation",
+    "AnimationTrackTarget",
+    "AnimationTrackValue",
+    "AnimationValue",
     "Quaternion",
     "SkeletalAnimationClip",
     "SkeletalBonePose",
@@ -518,6 +775,7 @@ __all__ = [
     "SkeletalMatrix4",
     "SkeletalPose",
     "SkeletalTransform",
+    "TrackAnimationClip",
     "UvAnimationClip",
     "UvAnimationFrame",
     "UvMatrix3",

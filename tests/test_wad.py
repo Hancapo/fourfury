@@ -249,6 +249,63 @@ class WadTests(unittest.TestCase):
         self.assertAlmostEqual(sampled[1], 10.5)
         self.assertAlmostEqual(sampled[2], 5.0)
 
+    def test_projects_selected_logical_tracks_into_neutral_frames(self) -> None:
+        animation = WadDocument.from_bytes(_sample_wad()).animations[0]
+
+        self.assertEqual(
+            tuple(target.key for target in animation.targets),
+            (
+                (417, int(WadTrackId.BONE_TRANSLATION)),
+                (417, int(WadTrackId.BONE_ROTATION)),
+                (0, int(WadTrackId.ACTION_FLAGS)),
+            ),
+        )
+        self.assertEqual(tuple(animation.iter_tracks()), animation.targets)
+        self.assertEqual(
+            animation.evaluate_tracks(
+                1,
+                track_ids=(
+                    WadTrackId.BONE_TRANSLATION,
+                    WadTrackId.BONE_ROTATION,
+                ),
+            ),
+            {
+                (417, int(WadTrackId.BONE_TRANSLATION)): (2.0, 11.0, 5.0),
+                (417, int(WadTrackId.BONE_ROTATION)): (0.0, 0.0, 0.0, 1.0),
+            },
+        )
+        sampled = animation.sample_tracks(
+            1.0 / 60.0,
+            track_ids=(WadTrackId.BONE_TRANSLATION,),
+        )
+        sampled_translation = sampled[
+            (417, int(WadTrackId.BONE_TRANSLATION))
+        ]
+        assert isinstance(sampled_translation, tuple)
+        self.assertAlmostEqual(sampled_translation[0], 1.5)
+        self.assertAlmostEqual(sampled_translation[1], 10.5)
+        self.assertAlmostEqual(sampled_translation[2], 5.0)
+
+        clip = animation.to_track_animation(
+            track_ids=(
+                WadTrackId.BONE_TRANSLATION,
+                WadTrackId.BONE_ROTATION,
+            ),
+        )
+        self.assertEqual(clip.name, "walk")
+        self.assertEqual(clip.frame_count, 3)
+        self.assertEqual(len(clip.targets), 2)
+        self.assertEqual(
+            clip.frames[1].get(417, WadTrackId.BONE_TRANSLATION).value,  # type: ignore[union-attr]
+            (2.0, 11.0, 5.0),
+        )
+        self.assertEqual(
+            animation.to_data(
+                track_ids=(WadTrackId.BONE_TRANSLATION,),
+            )["name"],
+            "walk",
+        )
+
     def test_defers_sampled_channel_materialization(self) -> None:
         animation = WadDocument.from_bytes(_sample_wad()).animations[0]
         translation = animation.tracks[0].chunks[0]

@@ -6,14 +6,20 @@ import struct
 from dataclasses import dataclass, field
 from enum import IntEnum, IntFlag
 from pathlib import Path
-from typing import BinaryIO, Callable, Iterator
+from typing import BinaryIO, Callable, Iterable, Iterator
 
 from ._utils import atomic_write
 from .animation import (
+    AnimationTrackFrame,
+    AnimationTrackInterpolation,
+    AnimationTrackTarget,
+    AnimationTrackValue,
+    AnimationValue,
     SkeletalAnimationClip,
     SkeletalBonePose,
     SkeletalPose,
     SkeletalTransform,
+    TrackAnimationClip,
     UvAnimationClip,
     UvAnimationFrame,
     UvTransform,
@@ -605,6 +611,29 @@ class WadChunk:
     channels: tuple[WadChannel, ...]
     pointer: int = field(default=0, repr=False, compare=False)
 
+    @property
+    def component_count(self) -> int:
+        count = 0
+        for channel in self.channels:
+            count += len(channel.vector) if channel.vector is not None else 1
+        return count
+
+    def value_at(self, frame: int) -> AnimationValue:
+        """Evaluate the serialized components without coercing integers to floats."""
+
+        result: list[Scalar] = []
+        for channel in self.channels:
+            value = channel.value_at(frame)
+            if isinstance(value, tuple):
+                result.extend(value)
+            else:
+                result.append(value)
+        if not result:
+            return 0.0
+        if len(result) == 1:
+            return result[0]
+        return tuple(result)
+
     def vector_at(self, frame: int) -> tuple[float, float, float, float]:
         result = [0.0, 0.0, 0.0, 0.0]
         component = 0
@@ -678,6 +707,16 @@ class WadAnimation:
     tracks: tuple[WadTrack, ...]
     vft: int = field(default=0, repr=False, compare=False)
     pointer: int = field(default=0, repr=False, compare=False)
+    _targets: tuple[AnimationTrackTarget, ...] = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _targets_by_key: dict[tuple[int, int], AnimationTrackTarget] = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
     _skeletal_tracks: tuple[WadBoneId, ...] = field(
         init=False,
         repr=False,
@@ -696,19 +735,61 @@ class WadAnimation:
 
     def __post_init__(self) -> None:
         unique: dict[tuple[int, int], WadBoneId] = {}
+        target_chunks: dict[tuple[int, int], WadChunk] = {}
         for group in self.tracks:
             for chunk in group.chunks:
                 identifier = chunk.bone_id
+                unique.setdefault(identifier.target_key, identifier)
+                target_chunks.setdefault(identifier.target_key, chunk)
                 if identifier.is_skeletal_transform:
-                    unique.setdefault(identifier.target_key, identifier)
-        tracks = tuple(unique.values())
-        object.__setattr__(self, "_skeletal_tracks", tracks)
+                    continue
+        targets = tuple(
+            self._make_track_target(identifier, target_chunks[key])
+            for key, identifier in unique.items()
+        )
+        target_index = {target.key: target for target in targets}
+        object.__setattr__(self, "_targets", targets)
+        object.__setattr__(self, "_targets_by_key", target_index)
+        skeletal = tuple(
+            identifier
+            for identifier in unique.values()
+            if identifier.is_skeletal_transform
+        )
+        object.__setattr__(self, "_skeletal_tracks", skeletal)
         object.__setattr__(
             self,
             "_skeletal_bone_ids",
-            tuple(dict.fromkeys(item.bone_id for item in tracks)),
+            tuple(dict.fromkeys(item.bone_id for item in skeletal)),
         )
-        object.__setattr__(self, "_skeletal_target_keys", frozenset(unique))
+        object.__setattr__(
+            self,
+            "_skeletal_target_keys",
+            frozenset(item.target_key for item in skeletal),
+        )
+
+    @staticmethod
+    def _make_track_target(
+        identifier: WadBoneId,
+        chunk: WadChunk,
+    ) -> AnimationTrackTarget:
+        track_type = identifier.track_type
+        if track_type is WadTrackType.INTEGER:
+            interpolation = AnimationTrackInterpolation.STEP
+        elif track_type is WadTrackType.QUATERNION:
+            interpolation = AnimationTrackInterpolation.QUATERNION
+        else:
+            interpolation = AnimationTrackInterpolation.LINEAR
+        component_count = chunk.component_count
+        if interpolation is AnimationTrackInterpolation.QUATERNION:
+            component_count = 4
+        return AnimationTrackTarget(
+            target_id=identifier.bone_id,
+            track_id=identifier.track_id,
+            component_count=max(component_count, 1),
+            interpolation=interpolation,
+            target_name=identifier.bone_name,
+            track_name=identifier.track_name,
+        )
 
     @property
     def short_name(self) -> str:
@@ -741,7 +822,20 @@ class WadAnimation:
 
     @property
     def bone_ids(self) -> tuple[WadBoneId, ...]:
+        """Compatibility view of the first serialized track group."""
+
         return () if not self.tracks else tuple(chunk.bone_id for chunk in self.tracks[0].chunks)
+
+    @property
+    def targets(self) -> tuple[AnimationTrackTarget, ...]:
+        """All logical targets across every serialized track group."""
+
+        return self._targets
+
+    def iter_tracks(self) -> Iterator[AnimationTrackTarget]:
+        """Iterate logical tracks independently from per-block channel encoding."""
+
+        return iter(self.targets)
 
     @property
     def skeletal_tracks(self) -> tuple[WadBoneId, ...]:
@@ -923,6 +1017,178 @@ class WadAnimation:
         return chunk.vector_at(frame % frames_per_chunk)
 
     evaluate_frame = vector_at
+
+    def _group_at(self, frame: int) -> tuple[WadTrack, int]:
+        if not self.tracks:
+            raise ValueError("WAD animation has no track groups")
+        if frame < 0:
+            raise ValueError("WAD animation frame cannot be negative")
+        if self.frame_count:
+            frame = min(frame, self.frame_count - 1)
+        frames_per_chunk = self.frames_per_chunk or self.tracks[0].frames_per_chunk
+        if frames_per_chunk <= 0:
+            raise ValueError("WAD animation has no valid frames-per-chunk value")
+        group_index = min(frame // frames_per_chunk, len(self.tracks) - 1)
+        return self.tracks[group_index], frame % frames_per_chunk
+
+    @staticmethod
+    def _track_filter(
+        track_ids: Iterable[int | WadTrackId] | None,
+    ) -> frozenset[int] | None:
+        return (
+            None
+            if track_ids is None
+            else frozenset(int(track_id) for track_id in track_ids)
+        )
+
+    def evaluate_tracks(
+        self,
+        frame: int,
+        *,
+        track_ids: Iterable[int | WadTrackId] | None = None,
+    ) -> dict[tuple[int, int], AnimationValue]:
+        """Evaluate every selected logical track at an integer frame."""
+
+        selected = self._track_filter(track_ids)
+        group, local_frame = self._group_at(frame)
+        return {
+            chunk.bone_id.target_key: chunk.value_at(local_frame)
+            for chunk in group.chunks
+            if selected is None or chunk.bone_id.track_id in selected
+        }
+
+    def track_frame_at(
+        self,
+        frame: int,
+        *,
+        track_ids: Iterable[int | WadTrackId] | None = None,
+    ) -> AnimationTrackFrame:
+        count = max(self.frame_count, 1)
+        frame = min(max(int(frame), 0), count - 1)
+        time = (
+            0.0
+            if count <= 1 or self.duration <= 0.0
+            else (frame / (count - 1)) * self.duration
+        )
+        values = self.evaluate_tracks(frame, track_ids=track_ids)
+        return AnimationTrackFrame(
+            time,
+            tuple(
+                AnimationTrackValue(self._targets_by_key[key], value)
+                for key, value in values.items()
+            ),
+        )
+
+    def sample_tracks(
+        self,
+        time: float,
+        *,
+        track_ids: Iterable[int | WadTrackId] | None = None,
+        loop: bool | None = None,
+    ) -> dict[tuple[int, int], AnimationValue]:
+        """Sample selected logical tracks at a time in seconds."""
+
+        if time < 0.0:
+            raise ValueError("WAD animation time cannot be negative")
+        selected = self._track_filter(track_ids)
+        if self.frame_count <= 1 or self.duration <= 0.0:
+            return self.evaluate_tracks(0, track_ids=selected)
+        should_loop = bool(self.flags & WadAnimationFlags.LOOPED) if loop is None else loop
+        if should_loop:
+            time %= self.duration
+        else:
+            time = min(time, self.duration)
+        frame = time * self.frame_rate
+        frame0 = min(math.floor(frame), self.frame_count - 1)
+        frame1 = frame0 + 1
+        if frame1 >= self.frame_count:
+            frame1 = 0 if should_loop else self.frame_count - 1
+        alpha = frame - frame0
+        values0 = self.evaluate_tracks(frame0, track_ids=selected)
+        values1 = self.evaluate_tracks(frame1, track_ids=selected)
+        result: dict[tuple[int, int], AnimationValue] = {}
+        for key in dict.fromkeys((*values0, *values1)):
+            value0 = values0.get(key)
+            value1 = values1.get(key)
+            if value0 is None:
+                assert value1 is not None
+                result[key] = value1
+            elif value1 is None:
+                result[key] = value0
+            else:
+                result[key] = AnimationTrackValue(
+                    self._targets_by_key[key],
+                    value0,
+                ).interpolate(
+                    AnimationTrackValue(self._targets_by_key[key], value1),
+                    alpha,
+                ).value
+        return result
+
+    def sample_track_frame(
+        self,
+        time: float,
+        *,
+        track_ids: Iterable[int | WadTrackId] | None = None,
+        loop: bool | None = None,
+    ) -> AnimationTrackFrame:
+        should_loop = bool(self.flags & WadAnimationFlags.LOOPED) if loop is None else loop
+        sample_time = time
+        if self.duration > 0.0:
+            sample_time = (
+                time % self.duration
+                if should_loop
+                else min(time, self.duration)
+            )
+        values = self.sample_tracks(time, track_ids=track_ids, loop=should_loop)
+        return AnimationTrackFrame(
+            sample_time,
+            tuple(
+                AnimationTrackValue(self._targets_by_key[key], value)
+                for key, value in values.items()
+            ),
+        )
+
+    def iter_frames(
+        self,
+        *,
+        track_ids: Iterable[int | WadTrackId] | None = None,
+    ) -> Iterator[AnimationTrackFrame]:
+        """Yield neutral arbitrary-track frames without retaining a full clip."""
+
+        for frame in range(max(self.frame_count, 1)):
+            yield self.track_frame_at(frame, track_ids=track_ids)
+
+    def to_track_animation(
+        self,
+        *,
+        track_ids: Iterable[int | WadTrackId] | None = None,
+    ) -> TrackAnimationClip:
+        """Project selected WAD tracks into the format-neutral track contract."""
+
+        selected = self._track_filter(track_ids)
+        targets = tuple(
+            target
+            for target in self.targets
+            if selected is None or target.track_id in selected
+        )
+        return TrackAnimationClip(
+            name=self.short_name,
+            duration=max(self.duration, 0.0),
+            looping=bool(self.flags & WadAnimationFlags.LOOPED),
+            targets=targets,
+            frames=tuple(self.iter_frames(track_ids=selected)),
+            signature=self.signature,
+        )
+
+    def to_data(
+        self,
+        *,
+        track_ids: Iterable[int | WadTrackId] | None = None,
+    ) -> dict[str, object]:
+        """Return primitive neutral track data for external converters."""
+
+        return self.to_track_animation(track_ids=track_ids).to_data()
 
     def sample(
         self,
