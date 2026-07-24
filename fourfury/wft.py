@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import BinaryIO, Literal
 
 from ._utils import atomic_write
-from .fragment import FragmentAsset, FragmentPiece
+from .fragment import FragmentAsset, FragmentGroup, FragmentPiece
 from .model import ModelAsset, ModelBoundingSphere, ModelCoordinateSystem
 from .rsc import RSC5_VIRTUAL_BASE, Rsc5Resource
 from .wbn import WbnBound, _WbnParser
@@ -22,6 +22,11 @@ from .wdr import (
     WdrShaderGroup,
     WdrVector4,
     _WdrReader,
+)
+from .wft_audit import (
+    WftIssueSeverity,
+    WftValidationIssue,
+    validate_wft_fragment,
 )
 from .wtd import Rsc5Texture, Rsc5TextureDictionary
 
@@ -364,6 +369,13 @@ class WftGroup:
     damage_health: float
     pointer: int = field(repr=False, compare=False)
     children: tuple[WftChild, ...] = field(default=(), repr=False, compare=False)
+    index: int = field(default=-1, compare=False)
+    parent: WftGroup | None = field(default=None, repr=False, compare=False)
+    child_groups: tuple[WftGroup, ...] = field(
+        default=(),
+        repr=False,
+        compare=False,
+    )
 
     @property
     def is_root(self) -> bool:
@@ -376,6 +388,33 @@ class WftGroup:
     @property
     def is_glass(self) -> bool:
         return bool(self.flags & WftGroupFlags.MADE_OF_GLASS)
+
+    @property
+    def depth(self) -> int:
+        return len(self.ancestors)
+
+    @property
+    def ancestors(self) -> tuple[WftGroup, ...]:
+        result = []
+        seen = {id(self)}
+        current = self.parent
+        while current is not None and id(current) not in seen:
+            result.append(current)
+            seen.add(id(current))
+            current = current.parent
+        result.reverse()
+        return tuple(result)
+
+    def iter_descendants(self) -> Iterator[WftGroup]:
+        pending = list(reversed(self.child_groups))
+        seen = {id(self)}
+        while pending:
+            group = pending.pop()
+            if id(group) in seen:
+                continue
+            seen.add(id(group))
+            yield group
+            pending.extend(reversed(group.child_groups))
 
     @property
     def flag_info(self) -> tuple[WftFlagInfo, ...]:
@@ -575,6 +614,12 @@ class WftFragment:
     def root_groups(self) -> tuple[WftGroup, ...]:
         return tuple(group for group in self.groups if group.is_root)
 
+    @property
+    def root_child(self) -> WftChild | None:
+        if self.root_child_index >= len(self.children):
+            return None
+        return self.children[self.root_child_index]
+
     def find_group(self, name: str) -> WftGroup | None:
         key = name.casefold()
         return next((group for group in self.groups if group.name.casefold() == key), None)
@@ -586,6 +631,11 @@ class WftFragment:
     @property
     def unresolved_flags(self) -> int:
         return int(self.flags) & ~_flag_mask(WFT_FRAGMENT_FLAG_INFO)
+
+    def validate(self) -> tuple[WftValidationIssue, ...]:
+        """Return structural issues without decoding lazy child drawables."""
+
+        return validate_wft_fragment(self)
 
     def iter_drawables(self) -> Iterator[WftFragmentDrawable]:
         seen: set[int] = set()
@@ -808,6 +858,20 @@ class _WftReader:
             self.parse_group(pointer, group_names[index])
             for index, pointer in enumerate(group_pointers)
         )
+        child_groups_by_parent: list[list[WftGroup]] = [
+            [] for _ in groups
+        ]
+        for index, group in enumerate(groups):
+            group.index = index
+            if (
+                group.parent_group_index != 0xFF
+                and group.parent_group_index < len(groups)
+                and group.parent_group_index != index
+            ):
+                group.parent = groups[group.parent_group_index]
+                child_groups_by_parent[group.parent_group_index].append(group)
+        for index, group in enumerate(groups):
+            group.child_groups = tuple(child_groups_by_parent[index])
         children = tuple(self.parse_child(pointer) for pointer in child_pointers)
         for child in children:
             if child.group_index >= len(groups):
@@ -1021,10 +1085,46 @@ class WftDocument:
             if common_model is None
             else common_model.coordinate_system
         )
+        groups = tuple(
+            FragmentGroup(
+                index=group.index,
+                name=group.name,
+                parent_index=(
+                    None
+                    if group.parent_group_index == 0xFF
+                    else group.parent_group_index
+                ),
+                child_group_indices=tuple(
+                    child_group.index for child_group in group.child_groups
+                ),
+                piece_indices=tuple(
+                    range(group.child_index, group.child_index + group.child_count)
+                ),
+                flags=int(group.flags),
+                strength=group.strength,
+                force_transmission_scale_up=group.force_transmission_scale_up,
+                force_transmission_scale_down=group.force_transmission_scale_down,
+                joint_stiffness=group.joint_stiffness,
+                minimum_soft_angle_1=group.minimum_soft_angle_1,
+                maximum_soft_angle_1=group.maximum_soft_angle_1,
+                maximum_soft_angle_2=group.maximum_soft_angle_2,
+                maximum_soft_angle_3=group.maximum_soft_angle_3,
+                rotation_speed=group.rotation_speed,
+                rotation_strength=group.rotation_strength,
+                restoring_strength=group.restoring_strength,
+                restoring_maximum_torque=group.restoring_maximum_torque,
+                latch_strength=group.latch_strength,
+                mass=group.mass,
+                minimum_damage_force=group.minimum_damage_force,
+                damage_health=group.damage_health,
+            )
+            for group in fragment.groups
+        )
         return FragmentAsset(
             name=stem,
             common_model=common_model,
             pieces=tuple(pieces),
+            groups=groups,
             flags=int(fragment.flags),
             root_child_index=fragment.root_child_index,
             model_index=fragment.model_index,
@@ -1054,6 +1154,11 @@ class WftDocument:
         """Return every unique drawable model used by the neutral fragment."""
 
         return self.to_fragment().models
+
+    def validate(self) -> tuple[WftValidationIssue, ...]:
+        """Return structural fragment issues without decoding lazy drawables."""
+
+        return self.fragment.validate()
 
     def to_bytes(self) -> bytes:
         """Return the original lossless RSC5 resource."""
@@ -1095,11 +1200,14 @@ __all__ = [
     "WftFragmentFlags",
     "WftGroup",
     "WftGroupFlags",
+    "WftIssueSeverity",
     "WftMatrix3x4",
     "WftPhysicsArchetype",
     "WftSelfCollision",
+    "WftValidationIssue",
     "explain_child_flags",
     "explain_fragment_flags",
     "explain_group_flags",
     "load_wft",
+    "validate_wft_fragment",
 ]

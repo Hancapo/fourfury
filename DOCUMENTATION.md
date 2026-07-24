@@ -707,7 +707,9 @@ print(fragment.fragment.tune_name, fragment.fragment.bounding_sphere)
 print(fragment.fragment.archetype.mass)
 
 for group in fragment.groups:
-    print(group.name, group.mass, group.damage_health, group.flags)
+    print(group.index, group.name, group.depth, group.parent)
+    print(group.mass, group.damage_health, group.flags)
+    print(group.child_groups, tuple(group.iter_descendants()))
     for child in group.children:
         print(child.bone_index, child.undamaged_mass, child.damaged_mass)
         print(child.bone_attachment, child.link_attachment)
@@ -723,6 +725,8 @@ model = fragment.to_model()
 
 # The fragment API retains every breakable piece and visual state.
 asset = fragment.to_fragment()
+for group in asset.groups:
+    print(group.parent_index, group.child_group_indices, group.piece_indices)
 for piece in asset.pieces:
     print(piece.name, piece.group_index, piece.bone_index)
     print(piece.undamaged_model, piece.damaged_model)
@@ -730,6 +734,10 @@ for piece in asset.pieces:
 
 # Unique common, undamaged, and damaged models are also available directly.
 models = fragment.to_models()
+
+# Validation reports stable codes and source indices without loading child geometry.
+for issue in fragment.validate():
+    print(issue.severity, issue.code, issue.group_index, issue.child_index)
 ```
 
 `to_fragment()` returns a target-independent `FragmentAsset`. Its
@@ -738,6 +746,13 @@ models, masses, inertia, attachment matrices, and physics transforms. Reused
 drawable pointers resolve to the same immutable `ModelAsset`, so converters can
 preserve instancing. `to_data()` provides primitive fragment metadata without
 introducing a target-game or renderer dependency.
+
+`WftGroup` exposes stable `index`, `parent`, `child_groups`, `depth`,
+`ancestors`, and `iter_descendants()` relationships. The neutral
+`FragmentGroup` retains the hierarchy, piece membership, flags, and physical
+joint values without WFT pointers. `validate()` checks parent cycles, ranges,
+declared counts, membership, collision references, and parallel physics arrays;
+it does not resolve lazily loaded child drawables.
 
 Child drawables without their own shader group inherit the common drawable's
 materials, matching GTA IV's fragment loading behavior. The serialized absence
