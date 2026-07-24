@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import pickle
 import struct
 import unittest
 import zlib
@@ -239,6 +240,12 @@ def _sample_wdr_with_skeleton() -> bytes:
 
 
 class WdrTests(unittest.TestCase):
+    def test_public_types_keep_the_original_module_identity(self) -> None:
+        value = WdrVector4(1.0, 2.0, 3.0, 4.0)
+
+        self.assertEqual(WdrVector4.__module__, "fourfury.wdr")
+        self.assertEqual(pickle.loads(pickle.dumps(value)), value)
+
     def test_reads_model_skinning_metadata_and_geometry_palette(self) -> None:
         document = WdrDocument.from_bytes(_sample_wdr())
         model = document.models[0]
