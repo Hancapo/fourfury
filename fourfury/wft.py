@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import struct
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from enum import IntEnum, IntFlag
 from pathlib import Path
-from typing import BinaryIO, Iterator
+from typing import BinaryIO, Literal
 
 from ._utils import atomic_write
 from .model import ModelAsset
@@ -22,7 +23,6 @@ from .wdr import (
     _WdrReader,
 )
 from .wtd import Rsc5Texture, Rsc5TextureDictionary
-
 
 WFT_RESOURCE_VERSION = 0x70
 WFT_FRAGMENT_SIZE = 0x204
@@ -71,6 +71,162 @@ class WftDampingKind(IntEnum):
     ANGULAR_CONSTANT = 3
     ANGULAR_VELOCITY = 4
     ANGULAR_VELOCITY_SQUARED = 5
+
+
+WftFlagConfidence = Literal["verified", "inferred", "unresolved"]
+WftFlag = WftFragmentFlags | WftGroupFlags | WftChildFlags
+
+
+@dataclass(frozen=True, slots=True)
+class WftFlagInfo:
+    flag: WftFlag
+    effect: str
+    confidence: WftFlagConfidence
+
+
+WFT_FRAGMENT_FLAG_INFO = (
+    WftFlagInfo(
+        WftFragmentFlags.NEEDS_CACHE_ENTRY_TO_ACTIVATE,
+        "Requires cached runtime fragment state before activation.",
+        "inferred",
+    ),
+    WftFlagInfo(
+        WftFragmentFlags.HAS_ARTICULATED_PARTS,
+        "Declares articulated fragment parts.",
+        "inferred",
+    ),
+    WftFlagInfo(
+        WftFragmentFlags.UNUSED,
+        "Preserves a flag bit whose GTA IV runtime effect is unresolved.",
+        "unresolved",
+    ),
+    WftFlagInfo(
+        WftFragmentFlags.CLONE_BOUND_PARTS_IN_CACHE,
+        "Requests cloned bound parts in the runtime cache.",
+        "inferred",
+    ),
+    WftFlagInfo(
+        WftFragmentFlags.ALLOCATE_TYPE_AND_INCLUDE_FLAGS,
+        "Requests allocation of fragment type and include-flag state.",
+        "inferred",
+    ),
+    WftFlagInfo(
+        WftFragmentFlags.FORCE_ARTICULATED_DAMPING,
+        "Forces articulated damping behavior.",
+        "inferred",
+    ),
+    WftFlagInfo(
+        WftFragmentFlags.FORCE_LOAD_COMMON_DRAWABLE,
+        "Forces the common drawable to load.",
+        "inferred",
+    ),
+    WftFlagInfo(
+        WftFragmentFlags.FORCE_ALLOCATE_LINK_ATTACHMENTS,
+        "Forces allocation of link attachments.",
+        "inferred",
+    ),
+)
+
+WFT_GROUP_FLAG_INFO = (
+    WftFlagInfo(
+        WftGroupFlags.DISAPPEARS_WHEN_DEAD,
+        "Makes the group disappear after its health reaches zero.",
+        "inferred",
+    ),
+    WftFlagInfo(
+        WftGroupFlags.MADE_OF_GLASS,
+        "Marks the group as glass that shatters when broken.",
+        "inferred",
+    ),
+    WftFlagInfo(
+        WftGroupFlags.DAMAGE_WHEN_BROKEN,
+        "Damages the group after it separates from its parent.",
+        "inferred",
+    ),
+    WftFlagInfo(
+        WftGroupFlags.DOES_NOT_AFFECT_VEHICLES,
+        "Treats vehicles as infinitely massive for group collisions.",
+        "inferred",
+    ),
+    WftFlagInfo(
+        WftGroupFlags.DOES_NOT_PUSH_VEHICLES_DOWN,
+        "Prevents group collisions from pushing vehicles downward.",
+        "inferred",
+    ),
+    WftFlagInfo(
+        WftGroupFlags.HAS_CLOTH,
+        "Associates cloth behavior with the group.",
+        "inferred",
+    ),
+)
+
+WFT_CHILD_FLAG_INFO = (
+    WftFlagInfo(
+        WftChildFlags.DISABLED,
+        "Disables the fragment child.",
+        "inferred",
+    ),
+    WftFlagInfo(
+        WftChildFlags.CAN_BREAK,
+        "Allows the child to break from its group.",
+        "inferred",
+    ),
+    WftFlagInfo(
+        WftChildFlags.USES_DAMAGED_DRAWABLE,
+        "Selects the child's damaged drawable state.",
+        "inferred",
+    ),
+    WftFlagInfo(
+        WftChildFlags.VEHICLE_PART,
+        "Marks the child as a vehicle part.",
+        "inferred",
+    ),
+    WftFlagInfo(
+        WftChildFlags.GLASS_PART,
+        "Marks the child as a glass part.",
+        "inferred",
+    ),
+    WftFlagInfo(
+        WftChildFlags.CLOTH_PART,
+        "Marks the child as a cloth part.",
+        "inferred",
+    ),
+)
+
+
+def _flag_mask(details: tuple[WftFlagInfo, ...]) -> int:
+    return sum(int(detail.flag) for detail in details)
+
+
+def _explain_flags(
+    flags: IntFlag | int,
+    details: tuple[WftFlagInfo, ...],
+    flag_type: type[WftFlag],
+) -> tuple[WftFlagInfo, ...]:
+    value = int(flags)
+    active = [detail for detail in details if value & int(detail.flag)]
+    unresolved = value & ~_flag_mask(details)
+    if unresolved:
+        active.append(WftFlagInfo(
+            flag_type(unresolved),
+            "Preserved flag bits whose GTA IV runtime effect is unresolved.",
+            "unresolved",
+        ))
+    return tuple(active)
+
+
+def explain_fragment_flags(
+    flags: WftFragmentFlags | int,
+) -> tuple[WftFlagInfo, ...]:
+    return _explain_flags(flags, WFT_FRAGMENT_FLAG_INFO, WftFragmentFlags)
+
+
+def explain_group_flags(flags: WftGroupFlags | int) -> tuple[WftFlagInfo, ...]:
+    return _explain_flags(flags, WFT_GROUP_FLAG_INFO, WftGroupFlags)
+
+
+def explain_child_flags(flags: WftChildFlags | int) -> tuple[WftFlagInfo, ...]:
+    return _explain_flags(flags, WFT_CHILD_FLAG_INFO, WftChildFlags)
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,6 +360,14 @@ class WftGroup:
     def is_glass(self) -> bool:
         return bool(self.flags & WftGroupFlags.MADE_OF_GLASS)
 
+    @property
+    def flag_info(self) -> tuple[WftFlagInfo, ...]:
+        return explain_group_flags(self.flags)
+
+    @property
+    def unresolved_flags(self) -> int:
+        return int(self.flags) & ~_flag_mask(WFT_GROUP_FLAG_INFO)
+
 
 @dataclass(slots=True)
 class WftChild:
@@ -223,6 +387,14 @@ class WftChild:
     @property
     def has_damaged_drawable(self) -> bool:
         return self.damaged_drawable is not None
+
+    @property
+    def flag_info(self) -> tuple[WftFlagInfo, ...]:
+        return explain_child_flags(self.flags)
+
+    @property
+    def unresolved_flags(self) -> int:
+        return int(self.flags) & ~_flag_mask(WFT_CHILD_FLAG_INFO)
 
 
 @dataclass(slots=True)
@@ -273,6 +445,14 @@ class WftFragment:
     def find_group(self, name: str) -> WftGroup | None:
         key = name.casefold()
         return next((group for group in self.groups if group.name.casefold() == key), None)
+
+    @property
+    def flag_info(self) -> tuple[WftFlagInfo, ...]:
+        return explain_fragment_flags(self.flags)
+
+    @property
+    def unresolved_flags(self) -> int:
+        return int(self.flags) & ~_flag_mask(WFT_FRAGMENT_FLAG_INFO)
 
     def iter_drawables(self) -> Iterator[WftFragmentDrawable]:
         seen: set[int] = set()
@@ -625,9 +805,33 @@ def load_wft(source: str | Path | bytes | BinaryIO) -> WftDocument:
 
 
 __all__ = [
-    "WFT_CHILD_SIZE", "WFT_DRAWABLE_SIZE", "WFT_FRAGMENT_SIZE", "WFT_GROUP_SIZE",
-    "WFT_PHYSICS_ARCHETYPE_SIZE", "WFT_RESOURCE_VERSION", "WftChild", "WftChildFlags",
-    "WftDampingKind", "WftDocument", "WftEventReferences", "WftFragment",
-    "WftFragmentDrawable", "WftFragmentFlags", "WftGroup", "WftGroupFlags",
-    "WftMatrix3x4", "WftPhysicsArchetype", "WftSelfCollision", "load_wft",
+    "WFT_CHILD_FLAG_INFO",
+    "WFT_CHILD_SIZE",
+    "WFT_DRAWABLE_SIZE",
+    "WFT_FRAGMENT_FLAG_INFO",
+    "WFT_FRAGMENT_SIZE",
+    "WFT_GROUP_FLAG_INFO",
+    "WFT_GROUP_SIZE",
+    "WFT_PHYSICS_ARCHETYPE_SIZE",
+    "WFT_RESOURCE_VERSION",
+    "WftChild",
+    "WftChildFlags",
+    "WftDampingKind",
+    "WftDocument",
+    "WftEventReferences",
+    "WftFlag",
+    "WftFlagConfidence",
+    "WftFlagInfo",
+    "WftFragment",
+    "WftFragmentDrawable",
+    "WftFragmentFlags",
+    "WftGroup",
+    "WftGroupFlags",
+    "WftMatrix3x4",
+    "WftPhysicsArchetype",
+    "WftSelfCollision",
+    "explain_child_flags",
+    "explain_fragment_flags",
+    "explain_group_flags",
+    "load_wft",
 ]

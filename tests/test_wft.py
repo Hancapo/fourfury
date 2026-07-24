@@ -10,9 +10,10 @@ from fourfury import (
     WftDampingKind,
     WftDocument,
     WftFragmentFlags,
+    WftGroupFlags,
+    explain_group_flags,
     load_wft,
 )
-
 
 VIRTUAL_BASE = 0x50000000
 
@@ -135,6 +136,23 @@ class WftTests(unittest.TestCase):
         self.assertEqual(tuple(document.iter_drawables()), (document.drawable,))
         self.assertEqual(document.to_model().name, "fragment")
         self.assertEqual(document.to_model().bounding_box.minimum, (-1.0, -2.0, -3.0))
+
+    def test_explains_flag_confidence_without_hiding_unresolved_bits(self) -> None:
+        document = WftDocument.from_bytes(_sample_wft())
+
+        self.assertEqual(
+            [info.confidence for info in document.fragment.flag_info],
+            ["inferred", "inferred", "inferred"],
+        )
+        self.assertEqual(document.fragment.unresolved_flags, 0)
+
+        details = explain_group_flags(
+            WftGroupFlags.DISAPPEARS_WHEN_DEAD | WftGroupFlags(0x80)
+        )
+        self.assertEqual(details[0].flag, WftGroupFlags.DISAPPEARS_WHEN_DEAD)
+        self.assertEqual(details[0].confidence, "inferred")
+        self.assertEqual(details[-1].flag, WftGroupFlags(0x80))
+        self.assertEqual(details[-1].confidence, "unresolved")
 
     def test_loads_stream_and_preserves_resource_losslessly(self) -> None:
         source = _sample_wft()
