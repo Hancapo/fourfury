@@ -3,14 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .animation import UvTransform
-from .model import (
+from ..animation import UvTransform
+from ..model import (
     ModelMaterial,
     ModelMaterialParameter,
     ModelParameterKind,
     ModelTextureReference,
 )
-from .shaders import (
+from ..shaders import (
     WdrShaderDefinition,
     WdrShaderParameterName,
     WdrShaderPreset,
@@ -18,9 +18,9 @@ from .shaders import (
     find_wdr_shader_definition,
     find_wdr_shader_program,
 )
-from .wtd import Rsc5TextureDictionary
-from ._wdr_constants import WDR_SHADER_PARAMETER_NAMES
-from ._wdr_math import WdrVector4
+from ..wtd import Rsc5TextureDictionary
+from .constants import WDR_SHADER_PARAMETER_NAMES
+from .math import WdrVector4
 
 
 @dataclass(frozen=True, slots=True)

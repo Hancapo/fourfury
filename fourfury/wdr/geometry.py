@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import IntEnum
 
-from .model import (
+from ..model import (
     ModelBoundingSphere,
     ModelColorChannel,
     ModelLod,
@@ -12,8 +12,8 @@ from .model import (
     ModelPrimitive,
     ModelTexCoordChannel,
 )
-from ._wdr_material import WdrShader
-from ._wdr_math import WdrVector2, WdrVector3, WdrVector4
+from .material import WdrShader
+from .math import WdrVector2, WdrVector3, WdrVector4
 
 
 class WdrLodLevel(IntEnum):

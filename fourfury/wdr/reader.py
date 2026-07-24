@@ -3,9 +3,9 @@ from __future__ import annotations
 import struct
 from collections.abc import Callable
 
-from .rsc import RSC5_PHYSICAL_BASE, RSC5_VIRTUAL_BASE, Rsc5Resource
-from .wtd import read_rsc5_texture_dictionary
-from ._wdr_constants import (
+from ..rsc import RSC5_PHYSICAL_BASE, RSC5_VIRTUAL_BASE, Rsc5Resource
+from ..wtd import read_rsc5_texture_dictionary
+from .constants import (
     WDR_DRAWABLE_SIZE,
     WDR_GEOMETRY_SIZE,
     WDR_INDEX_BUFFER_SIZE,
@@ -15,7 +15,7 @@ from ._wdr_constants import (
     WDR_SHADER_SIZE,
     WDR_VERTEX_BUFFER_SIZE,
 )
-from ._wdr_geometry import (
+from .geometry import (
     VertexValue,
     WdrDrawableLod,
     WdrDrawableModel,
@@ -30,14 +30,14 @@ from ._wdr_geometry import (
     WdrVertexSemantic,
     _ELEMENT_SIZES,
 )
-from ._wdr_material import (
+from .material import (
     WdrShader,
     WdrShaderGroup,
     WdrShaderParameter,
     WdrTextureReference,
 )
-from ._wdr_math import WdrMatrix4, WdrVector3, WdrVector4
-from ._wdr_scene import (
+from .math import WdrMatrix4, WdrVector3, WdrVector4
+from .scene import (
     WdrBone,
     WdrBoneFlags,
     WdrBoneId,
@@ -50,7 +50,7 @@ from ._wdr_scene import (
 )
 
 try:
-    from ._native import decode_wdr_vertices as _native_decode_wdr_vertices
+    from .._native import decode_wdr_vertices as _native_decode_wdr_vertices
 except ImportError:
     _native_decode_wdr_vertices = None
 

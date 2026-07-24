@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import IntEnum, IntFlag
 
-from .model import (
+from ..model import (
     ModelBone,
     ModelLight,
     ModelLightType,
@@ -12,10 +12,10 @@ from .model import (
     ModelTextureFormat,
     ModelTextureKind,
 )
-from .wtd import Rsc5Texture, Rsc5TextureFormat
-from ._wdr_geometry import WdrDrawableLod, WdrDrawableModel, WdrGeometry
-from ._wdr_material import WdrShaderGroup
-from ._wdr_math import WdrMatrix4, WdrVector3, WdrVector4
+from ..wtd import Rsc5Texture, Rsc5TextureFormat
+from .geometry import WdrDrawableLod, WdrDrawableModel, WdrGeometry
+from .material import WdrShaderGroup
+from .math import WdrMatrix4, WdrVector3, WdrVector4
 
 
 @dataclass(frozen=True, slots=True)
