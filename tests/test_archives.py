@@ -6,6 +6,7 @@ import tempfile
 import unittest
 import zlib
 from pathlib import Path
+from unittest.mock import patch
 
 from fourfury import GTAIVCrypto, GTAIV_AES_KEY, GTAIV_KEY_SHA1, ImgArchive, RpfArchive
 
@@ -110,6 +111,53 @@ class ArchiveTests(unittest.TestCase):
         self.assertTrue(entry.is_resource)  # type: ignore[union-attr]
         self.assertEqual(entry.table_value, flags)  # type: ignore[union-attr]
         self.assertEqual(entry.read(), resource)  # type: ignore[union-attr]
+
+    def test_img3_resource_read_caches_logical_size(self) -> None:
+        flags = 0xC0000040
+        resource = (
+            b"RSC\x05"
+            + struct.pack("<2I", 0x20, flags)
+            + zlib.compress(b"\0" * (2 * 1024 * 1024))
+        )
+        parsed = ImgArchive.from_bytes(
+            ImgArchive.empty().to_bytes()
+        )
+        parsed.add_file(
+            "large.wbn",
+            resource,
+            resource_type=0x20,
+            resource_flags=flags,
+        )
+        reparsed = ImgArchive.from_bytes(parsed.to_bytes())
+        entry = reparsed.find_entry("large.wbn")
+        self.assertIsNotNone(entry)
+        assert entry is not None
+        self.assertIsNone(entry._logical_size)
+        self.assertEqual(entry.read(), resource)
+        self.assertEqual(entry._logical_size, len(resource))
+        with patch.object(
+            ImgArchive,
+            "_trim_resource",
+            side_effect=AssertionError("resource was scanned twice"),
+        ):
+            self.assertEqual(entry.read(), resource)
+
+    def test_img3_raw_resource_read_keeps_sector_padding(self) -> None:
+        flags = 0xC0000040
+        resource = b"RSC\x05" + struct.pack("<2I", 0x20, flags) + zlib.compress(b"bounds")
+        archive = ImgArchive.empty()
+        archive.add_file(
+            "bounds.wbn",
+            resource,
+            resource_type=0x20,
+            resource_flags=flags,
+        )
+        parsed = ImgArchive.from_bytes(archive.to_bytes())
+        entry = parsed.find_entry("bounds.wbn")
+        self.assertIsNotNone(entry)
+        assert entry is not None
+        self.assertEqual(len(entry.read_raw()), entry.allocated_size)
+        self.assertEqual(entry.read_raw()[: len(resource)], resource)
 
     def test_img_rejects_directory_paths(self) -> None:
         with self.assertRaisesRegex(ValueError, "flat"):
