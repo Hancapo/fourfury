@@ -13,6 +13,9 @@ The changelog is release-oriented and uses a small fixed set of categories:
 ### Changed
 - WFT fragment, group, and child flags now expose confidence metadata and preserve unnamed bits explicitly instead of presenting later-RAGE meanings as verified GTA IV behavior.
 
+### Performance
+- WFT child drawables are decoded lazily, avoiding geometry and bound parsing when callers only inspect fragment physics.
+
 ## [0.2.0] - 2026-07-24
 
 ### Added

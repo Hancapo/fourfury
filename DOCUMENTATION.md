@@ -722,6 +722,13 @@ for drawable in fragment.iter_drawables():
 model = fragment.to_model()
 ```
 
+Child drawables are decoded on first access. Reading fragment groups, masses,
+inertia, and attachment matrices therefore does not materialize every drawable
+and collision bound. `undamaged_drawable_pointer` and
+`damaged_drawable_pointer` remain available without triggering that work;
+accessing either drawable property or iterating `iter_drawables()` resolves and
+caches the corresponding object.
+
 `WftFragmentFlags`, `WftGroupFlags`, and `WftChildFlags` preserve the named RAGE
 meanings without presenting later-engine equivalences as proven GTA IV behavior.
 Each fragment, group, and child exposes `flag_info` entries with `verified`,
