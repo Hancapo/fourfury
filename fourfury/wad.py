@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 import struct
 from dataclasses import dataclass, field
 from enum import IntEnum, IntFlag
@@ -23,6 +24,7 @@ WAD_ANIMATION_SIZE = 0x20
 WAD_TRACK_SIZE = 0x10
 WAD_CHUNK_SIZE = 0x18
 WAD_CHANNEL_HEADER_SIZE = 0x08
+_WAD_UV_ANIMATION_NAME = re.compile(r"^(?P<name>.+)_uv_(?P<material>\d+)$", re.IGNORECASE)
 
 
 class WadAnimationFlags(IntFlag):
@@ -233,12 +235,33 @@ class WadBoneId:
     bone_id: int
 
     @property
-    def track_type(self) -> WadTrackType:
+    def is_uv_channel(self) -> bool:
+        """Whether this identifier targets a material UV slot instead of a bone."""
+
+        return self.type_id == 0xFF
+
+    @property
+    def uv_index(self) -> int | None:
+        """Return the material/UV target index encoded in this identifier."""
+
+        return self.bone_id if self.is_uv_channel else None
+
+    @property
+    def track_type(self) -> WadTrackType | None:
+        if self.is_uv_channel:
+            return None
         return WadTrackType(self.type_id & 0x03)
 
     @property
-    def packing(self) -> WadTrackPacking:
+    def packing(self) -> WadTrackPacking | None:
+        if self.is_uv_channel:
+            return None
         return WadTrackPacking(self.type_id & 0x0C)
+
+    @property
+    def type_name(self) -> str:
+        track_type = self.track_type
+        return "UV" if track_type is None else track_type.name
 
     @property
     def action_flags(self) -> bool:
@@ -266,8 +289,17 @@ class WadBoneId:
 
     @property
     def bone_name(self) -> str:
+        if self.is_uv_channel:
+            return f"UV_{self.bone_id}"
         bone = self.bone
         return bone.name if bone is not None else f"BONE_{self.bone_id}"
+
+    def bind_uv(self, uv_index: int) -> WadBoneId:
+        """Return this track retargeted to a material UV index."""
+
+        if not 0 <= uv_index <= 0xFFFF:
+            raise ValueError("WAD UV index must fit in an unsigned 16-bit integer")
+        return WadBoneId(self.track_id, 0xFF, uv_index)
 
 
 Scalar = float | int
@@ -382,6 +414,24 @@ class WadAnimation:
     def short_name(self) -> str:
         name = self.name.replace("\\", "/").rsplit("/", 1)[-1]
         return name[:-5] if name.casefold().endswith(".anim") else name
+
+    @property
+    def uv_material_index(self) -> int | None:
+        """Infer the material index from the conventional ``_uv_<index>`` suffix."""
+
+        match = _WAD_UV_ANIMATION_NAME.fullmatch(self.short_name)
+        return None if match is None else int(match.group("material"))
+
+    @property
+    def uv_base_name(self) -> str | None:
+        """Return the UV animation name without its material-index suffix."""
+
+        match = _WAD_UV_ANIMATION_NAME.fullmatch(self.short_name)
+        return None if match is None else match.group("name")
+
+    @property
+    def is_uv_animation(self) -> bool:
+        return self.uv_material_index is not None
 
     @property
     def frame_rate(self) -> float:

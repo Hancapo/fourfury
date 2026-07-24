@@ -4,10 +4,12 @@ import io
 import struct
 import unittest
 import zlib
+from dataclasses import replace
 
 from fourfury import (
     WAD_RESOURCE_VERSION,
     WadAnimationFlags,
+    WadBoneId,
     WadBoneName,
     WadChannelType,
     WadDocument,
@@ -178,6 +180,7 @@ class WadTests(unittest.TestCase):
         self.assertEqual(translation.bone_id.bone, WadBoneName.CHAR_PELVIS)
         self.assertEqual(translation.bone_id.track_name, "BONE_TRANSLATION")
         self.assertEqual(translation.bone_id.bone_name, "CHAR_PELVIS")
+        self.assertEqual(translation.bone_id.type_name, "VECTOR3")
         self.assertEqual(
             [channel.channel_type for channel in translation.channels],
             [
@@ -218,6 +221,35 @@ class WadTests(unittest.TestCase):
             rle.value_at(0)
         self.assertEqual(raw.values, (7, 8, 9))
         self.assertEqual(raw.value_at(1), 8)
+
+    def test_models_uv_identity_without_misclassifying_it_as_integer(self) -> None:
+        identifier = WadBoneId(WadTrackId.SHADER_SLIDE_U, 0xFF, 3)
+
+        self.assertTrue(identifier.is_uv_channel)
+        self.assertEqual(identifier.uv_index, 3)
+        self.assertIsNone(identifier.track_type)
+        self.assertIsNone(identifier.packing)
+        self.assertEqual(identifier.type_name, "UV")
+        self.assertEqual(identifier.track_name, "SHADER_SLIDE_U")
+        self.assertEqual(identifier.bone_name, "UV_3")
+        self.assertEqual(
+            WadBoneId(WadTrackId.SHADER_SLIDE_V, 0, 417).bind_uv(5),
+            WadBoneId(WadTrackId.SHADER_SLIDE_V, 0xFF, 5),
+        )
+        with self.assertRaisesRegex(ValueError, "unsigned 16-bit"):
+            identifier.bind_uv(0x10000)
+
+    def test_recognizes_exporter_uv_animation_name_convention(self) -> None:
+        animation = WadDocument.from_bytes(_sample_wad()).animations[0]
+
+        self.assertFalse(animation.is_uv_animation)
+        self.assertIsNone(animation.uv_material_index)
+        self.assertIsNone(animation.uv_base_name)
+
+        animation = replace(animation, name="pack:/television_uv_12.anim")
+        self.assertTrue(animation.is_uv_animation)
+        self.assertEqual(animation.uv_material_index, 12)
+        self.assertEqual(animation.uv_base_name, "television")
 
     def test_loads_stream_and_preserves_resource_losslessly(self) -> None:
         source = _sample_wad()
