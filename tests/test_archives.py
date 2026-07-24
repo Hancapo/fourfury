@@ -6,6 +6,7 @@ import tempfile
 import unittest
 import zlib
 from pathlib import Path
+from unittest.mock import patch
 
 from fourfury import GTAIVCrypto, GTAIV_AES_KEY, GTAIV_KEY_SHA1, ImgArchive, RpfArchive
 
@@ -50,6 +51,47 @@ class ArchiveTests(unittest.TestCase):
                 self.assertIsNotNone(entry)
                 self.assertEqual(entry.read(), b"payload")  # type: ignore[union-attr]
             self.assertEqual(list(target.parent.glob(f".{target.name}.*.tmp")), [])
+
+    def test_archive_save_streams_without_to_bytes(self) -> None:
+        for archive in (ImgArchive.empty(), RpfArchive.empty()):
+            archive.add_file("example.bin", b"payload")
+            with tempfile.TemporaryDirectory() as directory:
+                target = Path(directory) / archive.name
+                with patch.object(
+                    type(archive),
+                    "to_bytes",
+                    side_effect=AssertionError("save materialized the archive"),
+                ):
+                    archive.save(target)
+                self.assertEqual(target.stat().st_size % 2048, 0)
+
+    def test_archive_can_replace_its_open_source(self) -> None:
+        for archive in (ImgArchive.empty(), RpfArchive.empty()):
+            archive.add_file("example.bin", b"payload")
+            with tempfile.TemporaryDirectory() as directory:
+                target = Path(directory) / archive.name
+                archive.save(target)
+                loaded = type(archive).from_path(target)
+                entry = loaded.find_entry("example.bin")
+                self.assertIsNotNone(entry)
+                assert entry is not None
+                self.assertEqual(entry.read(), b"payload")
+                loaded.save(target)
+                self.assertEqual(loaded.find_entry("example.bin").read(), b"payload")  # type: ignore[union-attr]
+                loaded.close()
+
+    def test_to_bytes_releases_per_entry_payload_copies(self) -> None:
+        for archive in (ImgArchive.empty(), RpfArchive.empty()):
+            archive.add_file("first.bin", b"a" * 4096)
+            archive.add_file("second.bin", b"b" * 4096)
+            packed = archive.to_bytes()
+            self.assertIs(archive._source_bytes, packed)
+            entries = (
+                archive.entries
+                if isinstance(archive, ImgArchive)
+                else tuple(archive.iter_entries(include_directories=False))
+            )
+            self.assertTrue(all(entry._data is None for entry in entries))
 
     def test_rpf2_round_trip_with_directories_and_case_insensitive_lookup(self) -> None:
         archive = RpfArchive.empty("example")

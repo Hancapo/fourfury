@@ -3,13 +3,14 @@ from __future__ import annotations
 import struct
 from collections import deque
 from dataclasses import dataclass, field
+from io import BytesIO
 from pathlib import Path
 from typing import BinaryIO, Iterator
 
 from ._utils import (
     SECTOR_SIZE,
     align,
-    atomic_write,
+    atomic_binary_writer,
     decompress_deflate,
     normalize_key,
     normalize_path,
@@ -339,7 +340,7 @@ class RpfArchive:
             pending.extend(child for child in directory.children if isinstance(child, RpfDirectoryEntry))
         return entries
 
-    def to_bytes(self) -> bytes:
+    def _write_to(self, output: BinaryIO) -> list[RpfEntry]:
         if self.version != 2:
             raise NotImplementedError("writing RPF3 audio archives is not supported yet")
         entries = self._flatten_for_write()
@@ -353,19 +354,18 @@ class RpfArchive:
             entry.name_offset = len(names)
             names.extend(entry.name.encode("utf-8") + b"\0")
         toc_size = align(len(entries) * _ENTRY_SIZE + len(names))
-        data_offset = RPF_HEADER_SIZE + toc_size
-        payloads: list[tuple[RpfFileEntry, bytes]] = []
+        output.write(b"\0" * (RPF_HEADER_SIZE + toc_size))
         for entry in entries:
             if isinstance(entry, RpfFileEntry):
                 payload = entry.read() if entry._data is None else bytes(entry._data)
-                data_offset = align(data_offset)
-                entry.offset = data_offset
+                aligned_offset = align(output.tell())
+                output.write(b"\0" * (aligned_offset - output.tell()))
+                entry.offset = aligned_offset
                 entry.size = len(payload)
                 if entry.resource_type == 0:
                     entry.uncompressed_size = len(payload)
-                entry._data = payload
-                payloads.append((entry, payload))
-                data_offset += align(len(payload))
+                output.write(payload)
+                output.write(b"\0" * (align(output.tell()) - output.tell()))
         table = bytearray()
         for index, entry in enumerate(entries):
             if isinstance(entry, RpfDirectoryEntry):
@@ -378,18 +378,52 @@ class RpfArchive:
                 table.extend(struct.pack("<4I", entry.name_offset, entry.size, encoded_offset, entry.uncompressed_size))
         table.extend(names)
         table.extend(b"\0" * (toc_size - len(table)))
-        output = bytearray(struct.pack("<4s4I", RPF2_MAGIC, toc_size, len(entries), self.reserved, 0))
-        output.extend(b"\0" * (RPF_HEADER_SIZE - len(output)))
-        output.extend(table)
-        for entry, payload in payloads:
-            output.extend(b"\0" * (entry.offset - len(output)))
-            output.extend(payload)
-            output.extend(b"\0" * (align(len(output)) - len(output)))
+        output.seek(0)
+        output.write(
+            struct.pack(
+                "<4s4I",
+                RPF2_MAGIC,
+                toc_size,
+                len(entries),
+                self.reserved,
+                0,
+            )
+        )
+        output.write(b"\0" * (RPF_HEADER_SIZE - output.tell()))
+        output.write(table)
+        return entries
+
+    def _adopt_written_source(
+        self,
+        entries: list[RpfEntry],
+        *,
+        data: bytes | None = None,
+        path: Path | None = None,
+        clear_data: bool,
+    ) -> None:
+        if clear_data:
+            for entry in entries:
+                if isinstance(entry, RpfFileEntry):
+                    entry._data = None
+        self._source_bytes = data
+        self._source_file = path
+        self.source_path = "" if path is None else str(path)
         self.encrypted = False
-        return bytes(output)
+
+    def to_bytes(self) -> bytes:
+        output = BytesIO()
+        entries = self._write_to(output)
+        result = output.getvalue()
+        self.close()
+        self._adopt_written_source(entries, data=result, clear_data=True)
+        return result
 
     def save(self, path: str | Path) -> None:
-        atomic_write(path, self.to_bytes())
+        target = Path(path)
+        with atomic_binary_writer(target) as output:
+            entries = self._write_to(output)
+            self.close()
+        self._adopt_written_source(entries, path=target, clear_data=False)
 
     def extract(self, output_dir: str | Path) -> list[Path]:
         root = Path(output_dir)

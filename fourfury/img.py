@@ -3,10 +3,17 @@ from __future__ import annotations
 import struct
 import zlib
 from dataclasses import dataclass, field
+from io import BytesIO
 from pathlib import Path
 from typing import BinaryIO, Iterator
 
-from ._utils import SECTOR_SIZE, align, atomic_write, normalize_key, safe_destination
+from ._utils import (
+    SECTOR_SIZE,
+    align,
+    atomic_binary_writer,
+    normalize_key,
+    safe_destination,
+)
 from .crypto import GTAIVCrypto
 
 
@@ -44,6 +51,18 @@ class ImgEntry:
         if self._archive is None:
             raise ValueError("detached IMG entry")
         return self._archive.read_entry(self)
+
+
+@dataclass(frozen=True, slots=True)
+class _ImgWriteEntry:
+    entry: ImgEntry
+    source_offset: int
+    output_offset: int
+    logical_size: int
+    allocated_size: int
+    used_blocks: int
+    padding: int
+    payload: bytes | None
 
 
 @dataclass(slots=True)
@@ -222,36 +241,147 @@ class ImgArchive:
         self._index.pop(normalize_key(entry.name), None)
         return True
 
-    def to_bytes(self) -> bytes:
-        payloads = [(entry, entry.read()) for entry in self.entries]
+    def _write_plan(self) -> tuple[list[_ImgWriteEntry], bytes, int]:
         names = b"".join(entry.name.encode("utf-8") + b"\0" for entry in self.entries)
         table_size = len(self.entries) * IMG3_ENTRY_SIZE + len(names)
         data_offset = align(20 + table_size)
+        plan: list[_ImgWriteEntry] = []
+        for entry in self.entries:
+            payload = None if entry._data is None else bytes(entry._data)
+            if payload is None:
+                if self._source_bytes is None and self._source_file is None:
+                    raise ValueError(f"IMG3 entry has no readable payload: {entry.name}")
+                logical_size = entry.size
+                allocated_size = entry.allocated_size
+                used_blocks = entry.used_blocks
+                padding = entry.padding
+            else:
+                logical_size = len(payload)
+                allocated_size = align(logical_size)
+                used_blocks = allocated_size // SECTOR_SIZE
+                padding = 0 if entry.is_resource else allocated_size - logical_size
+            plan.append(
+                _ImgWriteEntry(
+                    entry,
+                    entry.offset,
+                    data_offset,
+                    logical_size,
+                    allocated_size,
+                    used_blocks,
+                    padding,
+                    payload,
+                )
+            )
+            data_offset += allocated_size
+        return plan, names, table_size
+
+    def _copy_source(
+        self,
+        output: BinaryIO,
+        offset: int,
+        size: int,
+    ) -> None:
+        cursor = offset
+        remaining = size
+        while remaining:
+            chunk_size = min(1024 * 1024, remaining)
+            chunk = self._read_source(cursor, chunk_size)
+            if len(chunk) != chunk_size:
+                raise ValueError("truncated IMG3 entry payload")
+            output.write(chunk)
+            cursor += chunk_size
+            remaining -= chunk_size
+
+    def _write_to(
+        self,
+        output: BinaryIO,
+        plan: list[_ImgWriteEntry],
+        names: bytes,
+        table_size: int,
+    ) -> None:
         table = bytearray()
-        for entry, payload in payloads:
-            entry.size = len(payload)
-            entry.offset_sectors = data_offset // SECTOR_SIZE
-            entry.used_blocks = align(entry.size) // SECTOR_SIZE
-            if not entry.is_resource:
-                entry.padding = entry.allocated_size - entry.size
-            entry._data = payload
-            first_dword = entry.table_value if entry.is_resource and entry.table_value else entry.size
-            table.extend(struct.pack("<IIIHH", first_dword, entry.resource_type, entry.offset_sectors, entry.used_blocks, entry.padding))
-            data_offset += entry.allocated_size
+        for item in plan:
+            entry = item.entry
+            first_dword = (
+                entry.table_value
+                if entry.is_resource and entry.table_value
+                else item.logical_size
+            )
+            table.extend(
+                struct.pack(
+                    "<IIIHH",
+                    first_dword,
+                    entry.resource_type,
+                    item.output_offset // SECTOR_SIZE,
+                    item.used_blocks,
+                    item.padding,
+                )
+            )
         table.extend(names)
-        output = bytearray(struct.pack("<4I2H", IMG3_MAGIC, IMG3_VERSION, len(self.entries), table_size, IMG3_ENTRY_SIZE, self.reserved))
-        output.extend(table)
-        output.extend(b"\0" * (align(len(output)) - len(output)))
-        for entry, payload in payloads:
-            expected = entry.offset
-            output.extend(b"\0" * (expected - len(output)))
-            output.extend(payload)
-            output.extend(b"\0" * (entry.allocated_size - len(payload)))
+        output.write(
+            struct.pack(
+                "<4I2H",
+                IMG3_MAGIC,
+                IMG3_VERSION,
+                len(self.entries),
+                table_size,
+                IMG3_ENTRY_SIZE,
+                self.reserved,
+            )
+        )
+        output.write(table)
+        output.write(b"\0" * (align(output.tell()) - output.tell()))
+        for item in plan:
+            if output.tell() != item.output_offset:
+                raise ValueError("IMG3 write plan produced an invalid entry offset")
+            if item.payload is None:
+                self._copy_source(
+                    output,
+                    item.source_offset,
+                    item.allocated_size,
+                )
+            else:
+                output.write(item.payload)
+                output.write(b"\0" * (item.allocated_size - len(item.payload)))
+
+    def _apply_write_plan(
+        self,
+        plan: list[_ImgWriteEntry],
+        *,
+        clear_data: bool,
+    ) -> None:
+        for item in plan:
+            entry = item.entry
+            entry.size = item.logical_size
+            entry.offset_sectors = item.output_offset // SECTOR_SIZE
+            entry.used_blocks = item.used_blocks
+            entry.padding = item.padding
+            if clear_data:
+                entry._data = None
+
+    def to_bytes(self) -> bytes:
+        plan, names, table_size = self._write_plan()
+        output = BytesIO()
+        self._write_to(output, plan, names, table_size)
+        result = output.getvalue()
+        self.close()
+        self._apply_write_plan(plan, clear_data=True)
+        self._source_bytes = result
+        self._source_file = None
         self.encrypted = False
-        return bytes(output)
+        return result
 
     def save(self, path: str | Path) -> None:
-        atomic_write(path, self.to_bytes())
+        target = Path(path)
+        plan, names, table_size = self._write_plan()
+        with atomic_binary_writer(target) as output:
+            self._write_to(output, plan, names, table_size)
+            self.close()
+        self._apply_write_plan(plan, clear_data=False)
+        self._source_bytes = None
+        self._source_file = target
+        self.source_path = str(target)
+        self.encrypted = False
 
     def extract(self, output_dir: str | Path) -> list[Path]:
         root = Path(output_dir)

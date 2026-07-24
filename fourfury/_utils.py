@@ -3,7 +3,10 @@ from __future__ import annotations
 import os
 import tempfile
 import zlib
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import BinaryIO
 
 
 SECTOR_SIZE = 2048
@@ -31,9 +34,9 @@ def safe_destination(root: Path, member: str | Path) -> Path:
     return destination
 
 
-def atomic_write(path: str | Path, data: bytes) -> None:
-    """Write *data* beside the destination and atomically replace it."""
-
+@contextmanager
+def atomic_binary_writer(path: str | Path) -> Iterator[BinaryIO]:
+    """Yield a temporary binary stream and atomically replace its destination."""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary: Path | None = None
@@ -46,13 +49,21 @@ def atomic_write(path: str | Path, data: bytes) -> None:
             delete=False,
         ) as stream:
             temporary = Path(stream.name)
-            stream.write(data)
+            yield stream
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, target)
+        temporary = None
     finally:
         if temporary is not None and temporary.exists():
             temporary.unlink()
+
+
+def atomic_write(path: str | Path, data: bytes) -> None:
+    """Write *data* beside the destination and atomically replace it."""
+
+    with atomic_binary_writer(path) as stream:
+        stream.write(data)
 
 
 def decompress_deflate(data: bytes) -> bytes:
