@@ -7,6 +7,9 @@ The changelog is release-oriented and uses a small fixed set of categories:
 
 ## [Unreleased]
 
+### Added
+- Lossless GTA IV `water.dat` support with typed triangle and quad surfaces, runtime flags, spatial queries, validation, editing, and format-neutral mesh export.
+
 ## [0.2.0] - 2026-07-24
 
 ### Added

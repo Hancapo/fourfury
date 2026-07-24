@@ -18,6 +18,7 @@ animation dictionaries, and related metadata.
 | IMG3 | Yes | Yes | Search, extraction, creation, and resource padding handling |
 | IDE | Yes | Yes | Lossless definitions with explicit MLO entities, rooms, portals, and validation |
 | IPL | Yes | Yes | Lossless sectioned text with typed GTA IV OCCL boxes |
+| water.dat | Yes | Yes | Lossless water triangles and quads, runtime flags, geometry queries, and neutral mesh export |
 | WPL | Yes | Yes | Placements, MLO resolution, explicit LOD hierarchies, world portals, and instance flags |
 | GTXD | Yes | Yes | Texture-parent chains and cycle detection |
 | NOD | Yes | Yes | Navigation nodes, links, costs, and topology validation |

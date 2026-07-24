@@ -16,6 +16,7 @@ has no target-game dependency.
 - [Opening stock archives](#opening-stock-archives)
 - [Creating archives](#creating-archives)
 - [Map definitions and placements](#map-definitions-and-placements)
+- [Water surfaces](#water-surfaces)
 - [Navigation paths](#navigation-paths)
 - [Collision bounds](#collision-bounds)
 - [Animation dictionaries](#animation-dictionaries)
@@ -31,6 +32,7 @@ has no target-game dependency.
 - Audio RPF3: reading and extraction. Names stored only as hashes are represented in hexadecimal.
 - IMG3: reading, searching, extraction, creation, and writing.
 - IPL: lossless sectioned text with typed `OCCL` occlusion boxes.
+- `water.dat`: lossless typed triangles and quads with runtime flags, spatial queries, validation, editing, and neutral mesh export.
 - WPL: typed reading and writing for instances, garages, parked cars, culls, MLO world portals, LOD culls, zones, and blocks.
 - IDE: lossless definitions with typed archetypes and complete nested MLO entities, rooms, portals, and topology validation.
 - GTXD/`txdp`: typed child-to-parent texture dictionary hierarchies, lossless editing, chain resolution, and cycle detection.
@@ -229,6 +231,46 @@ instance list or `lod_index`. With `strict=False` (the default), malformed links
 are retained as structured `issues` and affected nodes report
 `has_unresolved_parent`; `strict=True` raises `WplLodHierarchyError`. Neither
 mode changes the raw indices or the bytes written by `WplDocument`.
+
+## Water surfaces
+
+`WaterDocument` reads GTA IV's text `common/data/water.dat` without changing
+comments, directives, whitespace, numeric spelling, or line endings. The game
+uses 30-value quads and also accepts a legacy 22-value triangle form:
+
+```python
+from fourfury import WaterDocument, WaterSurfaceFlags
+
+water = WaterDocument.from_path(game / "common/data/water.dat")
+for surface in water:
+    print(surface.shape, surface.bounds, surface.height)
+    print(surface.is_visible, surface.is_rendered, surface.is_dynamic)
+    if surface.contains_xy(100.0, -250.0):
+        print("height", surface.height_at(100.0, -250.0))
+
+dynamic = [
+    surface
+    for surface in water
+    if surface.flags & WaterSurfaceFlags.DYNAMIC
+]
+mesh = water.to_mesh_data(visible_only=True)
+water.save("water.dat")
+```
+
+Quads retain the engine's triangle-strip order as `(0, 1, 2)` and
+`(2, 1, 3)`. `to_mesh_data()` returns primitive positions, triangle indices,
+and their source-surface indices without depending on a renderer or target
+game. `surfaces_at()` and `height_at()` provide XY point queries, while
+`validate()` reports non-finite values, degenerate geometry, and flag bits not
+yet named by FourFury.
+
+`WaterSurfaceFlags.VISIBLE`, `RENDER`, and `DYNAMIC` name the bits used by the
+GTA IV runtime loader. Unknown bits are preserved and exposed through
+`unresolved_flags`. The four values following each vertex position remain
+available as `WaterVertex.legacy_values`; GTA IV reads them but does not use
+them when constructing the runtime surfaces. Quads additionally expose their
+serialized dynamic-water value as `wave_scale`, while legacy triangles do not
+store it.
 
 ## Navigation paths
 
