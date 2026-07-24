@@ -262,6 +262,8 @@ class WadTests(unittest.TestCase):
             rle.value_at(0)
         self.assertEqual(raw.values, (7, 8, 9))
         self.assertEqual(raw.value_at(1), 8)
+        self.assertEqual(action.bone_id.track, WadTrackId.ACTION_FLAGS)
+        self.assertFalse(action.bone_id.is_skeletal_transform)
 
     def test_models_uv_identity_without_misclassifying_it_as_integer(self) -> None:
         identifier = WadBoneId(WadTrackId.SHADER_SLIDE_U, 0xFF, 3)
@@ -318,6 +320,29 @@ class WadTests(unittest.TestCase):
             (0.0, 0.0, 0.0, 1.0),
         )
         self.assertEqual(animation.skeletal_bone_ids, (417,))
+
+    def test_projects_complete_skeletal_poses_into_the_neutral_contract(self) -> None:
+        animation = WadDocument.from_bytes(_sample_wad()).animations[0]
+
+        pose = animation.skeletal_pose_at(1)
+        pelvis = pose.get_bone(417)
+        assert pelvis is not None
+        self.assertEqual(pose.bone_ids, (417,))
+        self.assertEqual(pelvis.translation, (2.0, 11.0, 5.0))
+        self.assertEqual(pelvis.rotation, (0.0, 0.0, 0.0, 1.0))
+        self.assertFalse(pelvis.has_root_motion)
+
+        sampled = animation.sample_skeletal(1.0 / 60.0)
+        sampled_pelvis = sampled.get_bone(417)
+        assert sampled_pelvis is not None
+        self.assertAlmostEqual(sampled_pelvis.translation[0], 1.5)  # type: ignore[index]
+
+        clip = animation.to_skeletal_animation()
+        self.assertEqual(clip.name, "walk")
+        self.assertEqual(clip.frame_count, 3)
+        self.assertEqual(clip.bone_ids, (417,))
+        self.assertEqual(clip.signature, animation.signature)
+        self.assertEqual(clip.to_data()["name"], "walk")
 
     def test_recognizes_exporter_uv_animation_name_convention(self) -> None:
         animation = WadDocument.from_bytes(_sample_wad()).animations[0]
