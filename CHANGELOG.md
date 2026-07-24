@@ -12,6 +12,9 @@ The changelog is release-oriented and uses a small fixed set of categories:
 - Text IPL support with typed GTA IV occlusion boxes.
 - Additional layered-terrain shader metadata, named drawable-light flags, and lightweight WBD hash inspection.
 
+### Fixed
+- WAD UV targets are identified explicitly instead of being reported as integer tracks.
+
 ## [0.1.0] - 2026-07-22
 
 ### Added

@@ -337,7 +337,7 @@ if animation is None:
 
 print(animation.name, animation.frame_count, animation.frame_rate)
 for identifier in animation.bone_ids:
-    print(identifier.track_name, identifier.bone_name, identifier.track_type.name)
+    print(identifier.track_name, identifier.bone_name, identifier.type_name)
 
 pelvis_translation = animation.sample(
     0.5,
@@ -352,6 +352,13 @@ Animations expose the serialized track groups, per-bone chunks, channel flags,
 duration, signature, and project flags. `WadBoneId.track_name` handles the
 action-flags bit explicitly, while `bone_name` resolves the stock character,
 facial, and vehicle IDs known to GTA IV.
+
+UV targets use the RAGE `TypeId == 0xFF` sentinel. `WadBoneId.is_uv_channel`,
+`uv_index`, and `type_name` expose that identity without misclassifying it as an
+integer track. `bind_uv(index)` can retarget an existing track using the same
+representation used by the runtime. Animations named with the established
+`name_uv_<material-index>` convention expose `is_uv_animation`,
+`uv_material_index`, and `uv_base_name`.
 
 Static float, integer, vector, and quaternion channels are decoded. Raw float
 and integer arrays and packed quantized floats are also materialized, so
