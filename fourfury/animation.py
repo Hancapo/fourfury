@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from bisect import bisect_right
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from operator import attrgetter
 from typing import TypeAlias
 
 
@@ -38,6 +39,7 @@ UvMatrix3: TypeAlias = tuple[
     float,
     float,
 ]
+_FRAME_TIME = attrgetter("time")
 
 
 def normalize_quaternion(value: Quaternion) -> Quaternion:
@@ -285,6 +287,11 @@ class SkeletalAnimationClip:
     frames: tuple[SkeletalPose, ...]
     signature: int = 0
     targets: tuple[SkeletalBoneTarget, ...] = ()
+    _targets_by_id: dict[int, SkeletalBoneTarget] = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         if self.duration < 0.0:
@@ -307,6 +314,11 @@ class SkeletalAnimationClip:
                 raise ValueError(
                     "skeletal animation targets do not match its ordered bones"
                 )
+        object.__setattr__(
+            self,
+            "_targets_by_id",
+            {target.bone_id: target for target in self.targets},
+        )
 
     @property
     def frame_count(self) -> int:
@@ -329,11 +341,7 @@ class SkeletalAnimationClip:
         )
 
     def get_target(self, bone_id: int) -> SkeletalBoneTarget | None:
-        target = int(bone_id)
-        return next(
-            (item for item in self.targets if item.bone_id == target),
-            None,
-        )
+        return self._targets_by_id.get(int(bone_id))
 
     def with_targets(
         self,
@@ -358,8 +366,7 @@ class SkeletalAnimationClip:
             time %= self.duration
         else:
             time = min(time, self.duration)
-        times = tuple(frame.time for frame in self.frames)
-        upper = bisect_right(times, time)
+        upper = bisect_right(self.frames, time, key=_FRAME_TIME)
         if upper == 0:
             return self.frames[0]
         if upper >= len(self.frames):
@@ -482,8 +489,7 @@ class UvAnimationClip:
             time %= self.duration
         else:
             time = min(time, self.duration)
-        times = tuple(frame.time for frame in self.frames)
-        upper = bisect_right(times, time)
+        upper = bisect_right(self.frames, time, key=_FRAME_TIME)
         if upper == 0:
             return self.frames[0].transform
         if upper >= len(self.frames):
