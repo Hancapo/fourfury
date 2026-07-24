@@ -4,9 +4,12 @@ import csv
 from dataclasses import dataclass, field
 from enum import IntFlag
 from pathlib import Path
-from typing import BinaryIO, Iterator, Literal
+from typing import TYPE_CHECKING, BinaryIO, Iterator, Literal
 
 from ._utils import atomic_write
+
+if TYPE_CHECKING:
+    from .mlo import MloArchetype
 
 IdeLineKind = Literal["blank", "comment", "section", "end", "raw"]
 IDE_ARCHETYPE_SECTIONS = frozenset({"objs", "tobj", "anim", "tanm"})
@@ -284,6 +287,28 @@ class IdeDocument:
     def uv_animated_archetypes(self) -> tuple[IdeArchetype, ...]:
         return tuple(archetype for archetype in self.iter_archetypes() if archetype.has_uv_animation)
 
+    def iter_mlo_archetypes(self) -> Iterator[MloArchetype]:
+        """Iterate complete nested MLO definitions from the IDE ``mlo`` section."""
+
+        from .mlo import parse_mlo_archetypes
+
+        return iter(parse_mlo_archetypes(self))
+
+    @property
+    def mlo_archetypes(self) -> tuple[MloArchetype, ...]:
+        return tuple(self.iter_mlo_archetypes())
+
+    def find_mlo_archetype(self, name: str) -> MloArchetype | None:
+        key = name.casefold()
+        return next(
+            (
+                archetype
+                for archetype in self.iter_mlo_archetypes()
+                if archetype.name.casefold() == key
+            ),
+            None,
+        )
+
     def find_archetype(self, name: str) -> IdeArchetype | None:
         key = name.casefold()
         return next(
@@ -351,6 +376,11 @@ def load_ide(source: str | Path | bytes | BinaryIO, *, encoding: str = "utf-8") 
 
 def create_ide(name: str = "definitions.ide") -> IdeDocument:
     return IdeDocument.empty(name)
+
+
+# Imported after the IDE classes to keep the cross-format MLO module acyclic
+# while preserving runtime-resolvable public annotations.
+from .mlo import MloArchetype
 
 
 __all__ = [

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, BinaryIO, ClassVar, Iterator, Literal, cast
 from ._utils import atomic_write
 
 if TYPE_CHECKING:
+    from .mlo import MloInstance, MloRegistry
     from .wpl_lod import WplLodHierarchy
 
 WPL_VERSION = 3
@@ -294,7 +295,9 @@ WplCull = WplTimeCycleModifier
 
 
 @dataclass(slots=True)
-class WplStrBig:
+class WplMloPortal:
+    """A section-8 world portal associated with an interior index."""
+
     SECTION: ClassVar[int] = 8
     model_name: str
     flags: int
@@ -310,9 +313,52 @@ class WplStrBig:
     _model_name_raw: bytes | None = field(default=None, repr=False, compare=False)
 
     @classmethod
-    def from_bytes(cls, data: bytes) -> "WplStrBig":
+    def from_bytes(cls, data: bytes) -> "WplMloPortal":
         values = struct.unpack("<24sIII7f", data)
         return cls(_decode_string(values[0]), *values[1:], _model_name_raw=values[0])
+
+    @property
+    def model_hash(self) -> int:
+        from .wbd import joaat
+
+        return joaat(self.model_name)
+
+    @property
+    def position(self) -> tuple[float, float, float]:
+        return (self.position_x, self.position_y, self.position_z)
+
+    @position.setter
+    def position(self, value: tuple[float, float, float]) -> None:
+        self.position_x, self.position_y, self.position_z = value
+
+    @property
+    def orientation(self) -> tuple[float, float, float, float]:
+        return (
+            self.rotation_x,
+            self.rotation_y,
+            self.rotation_z,
+            self.rotation_w,
+        )
+
+    @orientation.setter
+    def orientation(self, value: tuple[float, float, float, float]) -> None:
+        (
+            self.rotation_x,
+            self.rotation_y,
+            self.rotation_z,
+            self.rotation_w,
+        ) = value
+
+    def to_data(self) -> dict[str, object]:
+        return {
+            "model_name": self.model_name,
+            "model_hash": self.model_hash,
+            "flags": self.flags,
+            "interior_index": self.interior_index,
+            "reserved": self.reserved,
+            "position": list(self.position),
+            "orientation": list(self.orientation),
+        }
 
     def to_bytes(self) -> bytes:
         return struct.pack(
@@ -321,6 +367,10 @@ class WplStrBig:
             self.position_x, self.position_y, self.position_z,
             self.rotation_x, self.rotation_y, self.rotation_z, self.rotation_w,
         )
+
+
+# Compatibility alias for FourFury's original section-8 placeholder name.
+WplStrBig = WplMloPortal
 
 
 @dataclass(slots=True)
@@ -405,10 +455,10 @@ class WplBlock:
         )
 
 
-WplRecord = WplInstance | WplGarage | WplParkedCar | WplTimeCycleModifier | WplStrBig | WplLodCull | WplZone | WplBlock
+WplRecord = WplInstance | WplGarage | WplParkedCar | WplTimeCycleModifier | WplMloPortal | WplLodCull | WplZone | WplBlock
 _RECORD_TYPES = {
     0: WplInstance, 2: WplGarage, 3: WplParkedCar, 4: WplTimeCycleModifier,
-    8: WplStrBig, 9: WplLodCull, 10: WplZone, 15: WplBlock,
+    8: WplMloPortal, 9: WplLodCull, 10: WplZone, 15: WplBlock,
 }
 
 
@@ -484,8 +534,14 @@ class WplDocument:
         return cast(list[WplTimeCycleModifier], self.records(4))
 
     @property
+    def mlo_portals(self) -> list[WplMloPortal]:
+        return cast(list[WplMloPortal], self.records(8))
+
+    @property
     def strbig(self) -> list[WplStrBig]:
-        return cast(list[WplStrBig], self.records(8))
+        """Compatibility alias for :attr:`mlo_portals`."""
+
+        return cast(list[WplStrBig], self.mlo_portals)
 
     @property
     def lod_culls(self) -> list[WplLodCull]:
@@ -524,6 +580,11 @@ class WplDocument:
 
         return WplLodHierarchy.from_document(self, parent=parent, strict=strict)
 
+    def resolve_mlos(self, registry: MloRegistry) -> tuple[MloInstance, ...]:
+        """Resolve section-0 placements whose model hash names an MLO archetype."""
+
+        return registry.resolve(self)
+
     def __iter__(self) -> Iterator[WplRecord]:
         for section in range(16):
             yield from self.sections.get(section, ())
@@ -559,10 +620,16 @@ def create_wpl(name: str = "placement.wpl") -> WplDocument:
     return WplDocument.empty(name)
 
 
+# Imported after WPL record definitions so MLO projections can refer back to
+# WPL placements without leaving unresolved public annotations.
+from .mlo import MloInstance, MloRegistry
+
+
 __all__ = [
     "FlagConfidence", "WPL_HEADER_SIZE", "WPL_INSTANCE_FLAG_INFO", "WPL_SECTION_SIZES",
     "WPL_VERSION", "WplBlock", "WplCull", "WplDocument", "WplGarage", "WplInstance",
-    "WplInstanceFlagInfo", "WplInstanceFlags", "WplLodCull", "WplParkedCar", "WplRecord",
-    "WplStrBig", "WplTimeCycleModifier", "WplZone", "create_wpl", "explain_instance_flags",
+    "WplInstanceFlagInfo", "WplInstanceFlags", "WplLodCull", "WplMloPortal",
+    "WplParkedCar", "WplRecord", "WplStrBig", "WplTimeCycleModifier", "WplZone",
+    "create_wpl", "explain_instance_flags",
     "load_wpl",
 ]

@@ -19,6 +19,7 @@ The changelog is release-oriented and uses a small fixed set of categories:
 - Text IPL support with typed GTA IV occlusion boxes.
 - Additional layered-terrain shader metadata, named drawable-light flags, and lightweight WBD hash inspection.
 - Typed IDE archetype animation flags and neutral WDR default UV transforms.
+- Explicit MLO archetypes, entities, rooms, portals, topology validation, WPL resolution, and world-space projection.
 
 ### Fixed
 - WAD track-group sampling respects the shared boundary frame between adjacent groups.
