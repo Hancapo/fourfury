@@ -249,6 +249,33 @@ class WadTests(unittest.TestCase):
         self.assertAlmostEqual(sampled[1], 10.5)
         self.assertAlmostEqual(sampled[2], 5.0)
 
+    def test_defers_sampled_channel_materialization(self) -> None:
+        animation = WadDocument.from_bytes(_sample_wad()).animations[0]
+        translation = animation.tracks[0].chunks[0]
+        raw, quantized, _static = translation.channels
+
+        self.assertEqual(raw._values, ())
+        self.assertEqual(quantized._values, ())
+        self.assertEqual(quantized._quantized_values, ())
+        self.assertEqual(raw.value_at(1), 2.0)
+        self.assertEqual(quantized.value_at(1), 11.0)
+        self.assertEqual(raw._values, ())
+        self.assertEqual(quantized._values, ())
+        self.assertEqual(quantized._quantized_values, ())
+        self.assertEqual(quantized.values, (10.0, 11.0, 12.0))
+        self.assertEqual(quantized.quantized_values, (0, 1, 2))
+        self.assertEqual(
+            quantized,
+            WadChannel(
+                WadChannelType.QUANTIZED_FLOAT,
+                quantized.flags,
+                (10.0, 11.0, 12.0),
+                scale=quantized.scale,
+                offset=quantized.offset,
+                quantized_values=(0, 1, 2),
+            ),
+        )
+
     def test_exposes_raw_integer_and_packed_rle_data(self) -> None:
         action = WadDocument.from_bytes(_sample_wad()).animations[0].tracks[0].chunks[2]
         rle, raw = action.channels
@@ -338,6 +365,7 @@ class WadTests(unittest.TestCase):
         self.assertAlmostEqual(sampled_pelvis.translation[0], 1.5)  # type: ignore[index]
 
         clip = animation.to_skeletal_animation()
+        self.assertEqual(tuple(animation.iter_skeletal_poses()), clip.frames)
         self.assertEqual(clip.name, "walk")
         self.assertEqual(clip.frame_count, 3)
         self.assertEqual(clip.bone_ids, (417,))
