@@ -16,6 +16,7 @@ The changelog is release-oriented and uses a small fixed set of categories:
 
 ### Fixed
 - WAD UV targets are identified explicitly instead of being reported as integer tracks.
+- WAD skeletal targets remain stable when their per-chunk encoding changes, and sampled quaternions now use normalized shortest-path interpolation.
 
 ## [0.1.0] - 2026-07-22
 

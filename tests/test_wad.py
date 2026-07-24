@@ -8,11 +8,15 @@ from dataclasses import replace
 
 from fourfury import (
     WAD_RESOURCE_VERSION,
+    WadAnimation,
     WadAnimationFlags,
     WadBoneId,
     WadBoneName,
     WadChannelType,
+    WadChannel,
+    WadChunk,
     WadDocument,
+    WadTrack,
     WadTrackId,
     joaat,
     load_wad,
@@ -275,6 +279,45 @@ class WadTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "unsigned 16-bit"):
             identifier.bind_uv(0x10000)
+
+    def test_models_skeletal_targets_independently_from_chunk_encoding(self) -> None:
+        compact = WadBoneId(WadTrackId.BONE_ROTATION, 0x11, 417)
+        raw = WadBoneId(WadTrackId.BONE_ROTATION, 0x01, 417)
+
+        self.assertTrue(compact.targets(raw))
+        self.assertEqual(compact.target_key, (417, int(WadTrackId.BONE_ROTATION)))
+        self.assertTrue(compact.is_bone_transform)
+        self.assertTrue(compact.is_skeletal_transform)
+        self.assertTrue(compact.is_rotation)
+        self.assertFalse(compact.is_mover_transform)
+
+    def test_samples_skeletal_quaternions_normalized_over_the_shortest_path(self) -> None:
+        identifier = WadBoneId(WadTrackId.BONE_ROTATION, 0x11, 417)
+        chunk = WadChunk(
+            identifier,
+            (
+                WadChannel(WadChannelType.RAW_FLOAT, 0, (0.0, 0.0)),
+                WadChannel(WadChannelType.RAW_FLOAT, 0, (0.0, 0.0)),
+                WadChannel(WadChannelType.RAW_FLOAT, 0, (0.0, 0.0)),
+                WadChannel(WadChannelType.RAW_FLOAT, 0, (2.0, -4.0)),
+            ),
+        )
+        animation = WadAnimation(
+            "pack:/turn.anim",
+            WadAnimationFlags.NONE,
+            0,
+            2,
+            2,
+            1.0,
+            0,
+            (WadTrack((chunk,), identifier, 2, 0),),
+        )
+
+        self.assertEqual(
+            animation.sample(0.5, 417, WadTrackId.BONE_ROTATION),
+            (0.0, 0.0, 0.0, 1.0),
+        )
+        self.assertEqual(animation.skeletal_bone_ids, (417,))
 
     def test_recognizes_exporter_uv_animation_name_convention(self) -> None:
         animation = WadDocument.from_bytes(_sample_wad()).animations[0]

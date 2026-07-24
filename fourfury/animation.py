@@ -7,6 +7,7 @@ from typing import TypeAlias
 
 UvVector2: TypeAlias = tuple[float, float]
 UvVector4: TypeAlias = tuple[float, float, float, float]
+Quaternion: TypeAlias = tuple[float, float, float, float]
 UvMatrix3: TypeAlias = tuple[
     float,
     float,
@@ -18,6 +19,46 @@ UvMatrix3: TypeAlias = tuple[
     float,
     float,
 ]
+
+
+def normalize_quaternion(value: Quaternion) -> Quaternion:
+    """Return a unit quaternion, using identity for a zero-length value."""
+
+    x, y, z, w = value
+    length_squared = (x * x) + (y * y) + (z * z) + (w * w)
+    if length_squared <= 0.0:
+        return (0.0, 0.0, 0.0, 1.0)
+    inverse_length = length_squared ** -0.5
+    return (
+        x * inverse_length,
+        y * inverse_length,
+        z * inverse_length,
+        w * inverse_length,
+    )
+
+
+def interpolate_quaternion(
+    start: Quaternion,
+    end: Quaternion,
+    alpha: float,
+) -> Quaternion:
+    """Shortest-path normalized linear interpolation between two quaternions."""
+
+    if not 0.0 <= alpha <= 1.0:
+        raise ValueError("quaternion interpolation alpha must be between zero and one")
+    ax, ay, az, aw = normalize_quaternion(start)
+    bx, by, bz, bw = normalize_quaternion(end)
+    dot = (ax * bx) + (ay * by) + (az * bz) + (aw * bw)
+    if dot < 0.0:
+        bx, by, bz, bw = -bx, -by, -bz, -bw
+    return normalize_quaternion(
+        (
+            ax + ((bx - ax) * alpha),
+            ay + ((by - ay) * alpha),
+            az + ((bz - az) * alpha),
+            aw + ((bw - aw) * alpha),
+        )
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,10 +185,13 @@ class UvAnimationClip:
 
 
 __all__ = [
+    "Quaternion",
     "UvAnimationClip",
     "UvAnimationFrame",
     "UvMatrix3",
     "UvTransform",
     "UvVector2",
     "UvVector4",
+    "interpolate_quaternion",
+    "normalize_quaternion",
 ]

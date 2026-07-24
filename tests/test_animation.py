@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import unittest
 
-from fourfury import UvAnimationClip, UvAnimationFrame, UvTransform
+from fourfury import (
+    UvAnimationClip,
+    UvAnimationFrame,
+    UvTransform,
+    interpolate_quaternion,
+    normalize_quaternion,
+)
 
 
 class UvAnimationTests(unittest.TestCase):
@@ -40,6 +46,19 @@ class UvAnimationTests(unittest.TestCase):
         self.assertEqual(clip.sample(1.25), clip.sample(0.25))
         with self.assertRaisesRegex(ValueError, "ordered"):
             UvAnimationClip("bad", 0, 1.0, False, (last, first))
+
+
+class QuaternionTests(unittest.TestCase):
+    def test_normalizes_and_interpolates_over_the_shortest_path(self) -> None:
+        self.assertEqual(normalize_quaternion((0.0, 0.0, 0.0, 0.0)), (0.0, 0.0, 0.0, 1.0))
+        self.assertEqual(
+            interpolate_quaternion(
+                (0.0, 0.0, 0.0, 2.0),
+                (0.0, 0.0, 0.0, -4.0),
+                0.5,
+            ),
+            (0.0, 0.0, 0.0, 1.0),
+        )
 
 
 if __name__ == "__main__":
