@@ -379,6 +379,20 @@ tracks. `WadAnimation.skeletal_tracks` returns the stable target set, while
 `sample()` normalizes quaternion tracks and interpolates them over the shortest
 path.
 
+`skeletal_pose_at()` and `sample_skeletal()` evaluate all transform tracks as a
+single `SkeletalPose`. Each `SkeletalBonePose` keeps its ordinary local transform
+and `mover_transform` separate, so root motion is never applied implicitly.
+`to_skeletal_animation()` returns a format-neutral `SkeletalAnimationClip` with
+ordered frames, time sampling, the WAD skeleton signature, and primitive-data
+export:
+
+```python
+clip = wad["walk"].animation.to_skeletal_animation()
+pose = clip.sample(0.5)
+pelvis = pose.get_bone(417)
+converter_data = clip.to_data()
+```
+
 `to_uv_animation()` projects the two `SHADER_SLIDE_U` and `SHADER_SLIDE_V`
 matrix-row tracks into a format-neutral `UvAnimationClip`. The result contains
 ordered `UvAnimationFrame` objects, supports interpolation through `sample()`,

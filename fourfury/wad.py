@@ -6,14 +6,19 @@ import struct
 from dataclasses import dataclass, field
 from enum import IntEnum, IntFlag
 from pathlib import Path
-from typing import BinaryIO, Iterator
+from typing import BinaryIO, Callable, Iterator
 
 from ._utils import atomic_write
 from .animation import (
+    SkeletalAnimationClip,
+    SkeletalBonePose,
+    SkeletalPose,
+    SkeletalTransform,
     UvAnimationClip,
     UvAnimationFrame,
     UvTransform,
     interpolate_quaternion,
+    normalize_quaternion,
 )
 from .rsc import (
     RSC5_PHYSICAL_BASE,
@@ -135,6 +140,7 @@ class WadTrackId(IntEnum):
     CAMERA_FOCUS = 51
     CAMERA_NIGHT_CIRCLE_OF_CONFUSION = 52
     CAMERA_LIMIT = 53
+    ACTION_FLAGS = 128
 
 
 WAD_BONE_TRANSFORM_TRACKS = frozenset(
@@ -267,7 +273,7 @@ class WadBoneId:
     def target_key(self) -> tuple[int, int]:
         """Logical target shared by equivalent chunks with different encodings."""
 
-        return (self.bone_id, self.track_id & 0x7F)
+        return (self.bone_id, self.track_id)
 
     def targets(self, other: WadBoneId) -> bool:
         return self.target_key == other.target_key
@@ -297,20 +303,19 @@ class WadBoneId:
 
     @property
     def action_flags(self) -> bool:
-        return bool(self.track_id & 0x80)
+        return self.track is WadTrackId.ACTION_FLAGS
 
     @property
     def track(self) -> WadTrackId | None:
         try:
-            return WadTrackId(self.track_id & 0x7F)
+            return WadTrackId(self.track_id)
         except ValueError:
             return None
 
     @property
     def track_name(self) -> str:
         track = self.track
-        name = track.name if track is not None else f"TRACK_{self.track_id & 0x7F}"
-        return f"ACTION_FLAGS|{name}" if self.action_flags else name
+        return track.name if track is not None else f"TRACK_{self.track_id}"
 
     @property
     def is_bone_transform(self) -> bool:
@@ -522,6 +527,128 @@ class WadAnimation:
     @property
     def skeletal_bone_ids(self) -> tuple[int, ...]:
         return tuple(dict.fromkeys(item.bone_id for item in self.skeletal_tracks))
+
+    def _build_skeletal_pose(
+        self,
+        time: float,
+        evaluate: Callable[
+            [int, WadTrackId],
+            tuple[float, float, float, float],
+        ],
+    ) -> SkeletalPose:
+        targets = {item.target_key for item in self.skeletal_tracks}
+
+        def transform(
+            bone_id: int,
+            translation_track: WadTrackId,
+            rotation_track: WadTrackId,
+            scale_track: WadTrackId,
+        ) -> SkeletalTransform:
+            def value(
+                track_id: WadTrackId,
+            ) -> tuple[float, float, float, float] | None:
+                if (bone_id, int(track_id)) not in targets:
+                    return None
+                return evaluate(bone_id, track_id)
+
+            translation = value(translation_track)
+            rotation = value(rotation_track)
+            scale = value(scale_track)
+            return SkeletalTransform(
+                translation=(
+                    None
+                    if translation is None
+                    else (translation[0], translation[1], translation[2])
+                ),
+                rotation=(
+                    None
+                    if rotation is None
+                    else normalize_quaternion(rotation)
+                ),
+                scale=(
+                    None if scale is None else (scale[0], scale[1], scale[2])
+                ),
+            )
+
+        bones = tuple(
+            SkeletalBonePose(
+                bone_id,
+                transform(
+                    bone_id,
+                    WadTrackId.BONE_TRANSLATION,
+                    WadTrackId.BONE_ROTATION,
+                    WadTrackId.BONE_SCALE,
+                ),
+                transform(
+                    bone_id,
+                    WadTrackId.MOVER_TRANSLATION,
+                    WadTrackId.MOVER_ROTATION,
+                    WadTrackId.MOVER_SCALE,
+                ),
+            )
+            for bone_id in self.skeletal_bone_ids
+        )
+        if not bones:
+            raise ValueError("WAD animation has no skeletal transform tracks")
+        return SkeletalPose(time, bones)
+
+    def skeletal_pose_at(self, frame: int) -> SkeletalPose:
+        """Project an integer WAD frame into a format-neutral skeletal pose."""
+
+        if frame < 0:
+            raise ValueError("WAD animation frame cannot be negative")
+        count = max(self.frame_count, 1)
+        frame = min(frame, count - 1)
+        time = (
+            0.0
+            if count <= 1 or self.duration <= 0.0
+            else (frame / (count - 1)) * self.duration
+        )
+        return self._build_skeletal_pose(
+            time,
+            lambda bone_id, track_id: self.vector_at(frame, bone_id, track_id),
+        )
+
+    def sample_skeletal(
+        self,
+        time: float,
+        *,
+        loop: bool | None = None,
+    ) -> SkeletalPose:
+        """Sample all bone and mover tracks at a time in seconds."""
+
+        if time < 0.0:
+            raise ValueError("WAD animation time cannot be negative")
+        should_loop = bool(self.flags & WadAnimationFlags.LOOPED) if loop is None else loop
+        sample_time = time
+        if self.duration > 0.0:
+            sample_time = (
+                time % self.duration
+                if should_loop
+                else min(time, self.duration)
+            )
+        return self._build_skeletal_pose(
+            sample_time,
+            lambda bone_id, track_id: self.sample(
+                time,
+                bone_id,
+                track_id,
+                loop=should_loop,
+            ),
+        )
+
+    def to_skeletal_animation(self) -> SkeletalAnimationClip:
+        """Project every WAD frame into the neutral skeletal contract."""
+
+        count = max(self.frame_count, 1)
+        frames = tuple(self.skeletal_pose_at(frame) for frame in range(count))
+        return SkeletalAnimationClip(
+            name=self.short_name,
+            duration=max(self.duration, 0.0),
+            looping=bool(self.flags & WadAnimationFlags.LOOPED),
+            frames=frames,
+            signature=self.signature,
+        )
 
     def find_bone(
         self,

@@ -3,6 +3,10 @@ from __future__ import annotations
 import unittest
 
 from fourfury import (
+    SkeletalAnimationClip,
+    SkeletalBonePose,
+    SkeletalPose,
+    SkeletalTransform,
     UvAnimationClip,
     UvAnimationFrame,
     UvTransform,
@@ -59,6 +63,57 @@ class QuaternionTests(unittest.TestCase):
             ),
             (0.0, 0.0, 0.0, 1.0),
         )
+
+
+class SkeletalAnimationTests(unittest.TestCase):
+    def test_interpolates_optional_bone_and_root_motion_components(self) -> None:
+        first = SkeletalPose(
+            0.0,
+            (
+                SkeletalBonePose(
+                    417,
+                    SkeletalTransform(
+                        translation=(0.0, 0.0, 0.0),
+                        rotation=(0.0, 0.0, 0.0, 1.0),
+                    ),
+                    SkeletalTransform(translation=(0.0, 0.0, 0.0)),
+                ),
+            ),
+        )
+        last = SkeletalPose(
+            1.0,
+            (
+                SkeletalBonePose(
+                    417,
+                    SkeletalTransform(
+                        translation=(2.0, 0.0, 0.0),
+                        rotation=(0.0, 0.0, 1.0, 0.0),
+                        scale=(2.0, 2.0, 2.0),
+                    ),
+                    SkeletalTransform(translation=(0.0, 4.0, 0.0)),
+                ),
+            ),
+        )
+        clip = SkeletalAnimationClip("walk", 1.0, False, (first, last), 0x1234)
+
+        pose = clip.sample(0.5)
+        bone = pose.get_bone(417)
+        assert bone is not None
+        self.assertEqual(bone.translation, (1.0, 0.0, 0.0))
+        self.assertEqual(bone.scale, (2.0, 2.0, 2.0))
+        self.assertAlmostEqual(bone.rotation[2], 2 ** -0.5)  # type: ignore[index]
+        self.assertAlmostEqual(bone.rotation[3], 2 ** -0.5)  # type: ignore[index]
+        self.assertEqual(bone.mover_transform.translation, (0.0, 2.0, 0.0))
+        self.assertEqual(pose.root_motion_bones, (bone,))
+        self.assertEqual(clip.to_data()["signature"], 0x1234)
+
+    def test_rejects_incompatible_pose_layouts(self) -> None:
+        transform = SkeletalTransform(translation=(0.0, 0.0, 0.0))
+        first = SkeletalPose(0.0, (SkeletalBonePose(1, transform),))
+        other = SkeletalPose(1.0, (SkeletalBonePose(2, transform),))
+
+        with self.assertRaisesRegex(ValueError, "ordered bones"):
+            first.interpolate(other, 0.5)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ from typing import TypeAlias
 
 UvVector2: TypeAlias = tuple[float, float]
 UvVector4: TypeAlias = tuple[float, float, float, float]
+Vector3: TypeAlias = tuple[float, float, float]
 Quaternion: TypeAlias = tuple[float, float, float, float]
 UvMatrix3: TypeAlias = tuple[
     float,
@@ -59,6 +60,228 @@ def interpolate_quaternion(
             aw + ((bw - aw) * alpha),
         )
     )
+
+
+@dataclass(frozen=True, slots=True)
+class SkeletalTransform:
+    """Optional local transform components for one skeletal target."""
+
+    translation: Vector3 | None = None
+    rotation: Quaternion | None = None
+    scale: Vector3 | None = None
+
+    def __post_init__(self) -> None:
+        if self.rotation is not None:
+            object.__setattr__(self, "rotation", normalize_quaternion(self.rotation))
+
+    @property
+    def is_empty(self) -> bool:
+        return (
+            self.translation is None
+            and self.rotation is None
+            and self.scale is None
+        )
+
+    def interpolate(
+        self,
+        other: SkeletalTransform,
+        alpha: float,
+    ) -> SkeletalTransform:
+        if not 0.0 <= alpha <= 1.0:
+            raise ValueError("skeletal interpolation alpha must be between zero and one")
+
+        def vector(
+            start: Vector3 | None,
+            end: Vector3 | None,
+        ) -> Vector3 | None:
+            if start is None:
+                return end
+            if end is None:
+                return start
+            return tuple(
+                left + ((right - left) * alpha)
+                for left, right in zip(start, end, strict=True)
+            )  # type: ignore[return-value]
+
+        if self.rotation is None:
+            rotation = other.rotation
+        elif other.rotation is None:
+            rotation = self.rotation
+        else:
+            rotation = interpolate_quaternion(self.rotation, other.rotation, alpha)
+        return SkeletalTransform(
+            translation=vector(self.translation, other.translation),
+            rotation=rotation,
+            scale=vector(self.scale, other.scale),
+        )
+
+    def to_data(self) -> dict[str, list[float] | None]:
+        return {
+            "translation": (
+                None if self.translation is None else list(self.translation)
+            ),
+            "rotation": None if self.rotation is None else list(self.rotation),
+            "scale": None if self.scale is None else list(self.scale),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class SkeletalBonePose:
+    bone_id: int
+    transform: SkeletalTransform = SkeletalTransform()
+    mover_transform: SkeletalTransform = SkeletalTransform()
+
+    def __post_init__(self) -> None:
+        if self.bone_id < 0:
+            raise ValueError("skeletal bone ID cannot be negative")
+        if self.transform.is_empty and self.mover_transform.is_empty:
+            raise ValueError("skeletal bone pose must contain at least one transform")
+
+    @property
+    def translation(self) -> Vector3 | None:
+        return self.transform.translation
+
+    @property
+    def rotation(self) -> Quaternion | None:
+        return self.transform.rotation
+
+    @property
+    def scale(self) -> Vector3 | None:
+        return self.transform.scale
+
+    @property
+    def has_root_motion(self) -> bool:
+        return not self.mover_transform.is_empty
+
+    def interpolate(
+        self,
+        other: SkeletalBonePose,
+        alpha: float,
+    ) -> SkeletalBonePose:
+        if self.bone_id != other.bone_id:
+            raise ValueError("cannot interpolate poses for different skeletal bones")
+        return SkeletalBonePose(
+            self.bone_id,
+            self.transform.interpolate(other.transform, alpha),
+            self.mover_transform.interpolate(other.mover_transform, alpha),
+        )
+
+    def to_data(self) -> dict[str, object]:
+        return {
+            "bone_id": self.bone_id,
+            "transform": self.transform.to_data(),
+            "mover_transform": self.mover_transform.to_data(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class SkeletalPose:
+    time: float
+    bones: tuple[SkeletalBonePose, ...]
+
+    def __post_init__(self) -> None:
+        if self.time < 0.0:
+            raise ValueError("skeletal pose time cannot be negative")
+        if not self.bones:
+            raise ValueError("skeletal pose must contain at least one bone")
+        bone_ids = tuple(bone.bone_id for bone in self.bones)
+        if len(bone_ids) != len(set(bone_ids)):
+            raise ValueError("skeletal pose contains duplicate bone IDs")
+
+    def get_bone(self, bone_id: int) -> SkeletalBonePose | None:
+        target = int(bone_id)
+        return next((bone for bone in self.bones if bone.bone_id == target), None)
+
+    @property
+    def bone_ids(self) -> tuple[int, ...]:
+        return tuple(bone.bone_id for bone in self.bones)
+
+    @property
+    def root_motion_bones(self) -> tuple[SkeletalBonePose, ...]:
+        return tuple(bone for bone in self.bones if bone.has_root_motion)
+
+    def interpolate(self, other: SkeletalPose, alpha: float) -> SkeletalPose:
+        if self.bone_ids != other.bone_ids:
+            raise ValueError("skeletal poses do not target the same ordered bones")
+        return SkeletalPose(
+            self.time + ((other.time - self.time) * alpha),
+            tuple(
+                start.interpolate(end, alpha)
+                for start, end in zip(self.bones, other.bones, strict=True)
+            ),
+        )
+
+    def to_data(self) -> dict[str, object]:
+        return {
+            "time": self.time,
+            "bones": [bone.to_data() for bone in self.bones],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class SkeletalAnimationClip:
+    """Format-neutral sampled skeletal animation for converters and tooling."""
+
+    name: str
+    duration: float
+    looping: bool
+    frames: tuple[SkeletalPose, ...]
+    signature: int = 0
+
+    def __post_init__(self) -> None:
+        if self.duration < 0.0:
+            raise ValueError("skeletal animation duration cannot be negative")
+        if not self.frames:
+            raise ValueError("skeletal animation must contain at least one frame")
+        previous = -1.0
+        bone_ids = self.frames[0].bone_ids
+        for frame in self.frames:
+            if frame.time < previous:
+                raise ValueError("skeletal animation frames must be ordered")
+            if frame.bone_ids != bone_ids:
+                raise ValueError("skeletal animation frames target different bones")
+            previous = frame.time
+        if self.frames[-1].time > self.duration:
+            raise ValueError("skeletal animation frame time exceeds its duration")
+
+    @property
+    def frame_count(self) -> int:
+        return len(self.frames)
+
+    @property
+    def bone_ids(self) -> tuple[int, ...]:
+        return self.frames[0].bone_ids
+
+    def sample(self, time: float, *, loop: bool | None = None) -> SkeletalPose:
+        if time < 0.0:
+            raise ValueError("skeletal animation time cannot be negative")
+        if len(self.frames) == 1 or self.duration <= 0.0:
+            return self.frames[0]
+        should_loop = self.looping if loop is None else loop
+        if should_loop:
+            time %= self.duration
+        else:
+            time = min(time, self.duration)
+        times = tuple(frame.time for frame in self.frames)
+        upper = bisect_right(times, time)
+        if upper == 0:
+            return self.frames[0]
+        if upper >= len(self.frames):
+            return self.frames[-1]
+        frame0 = self.frames[upper - 1]
+        frame1 = self.frames[upper]
+        span = frame1.time - frame0.time
+        alpha = 0.0 if span <= 0.0 else (time - frame0.time) / span
+        return frame0.interpolate(frame1, alpha)
+
+    def to_data(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "duration": self.duration,
+            "looping": self.looping,
+            "signature": self.signature,
+            "frames": [frame.to_data() for frame in self.frames],
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,12 +409,17 @@ class UvAnimationClip:
 
 __all__ = [
     "Quaternion",
+    "SkeletalAnimationClip",
+    "SkeletalBonePose",
+    "SkeletalPose",
+    "SkeletalTransform",
     "UvAnimationClip",
     "UvAnimationFrame",
     "UvMatrix3",
     "UvTransform",
     "UvVector2",
     "UvVector4",
+    "Vector3",
     "interpolate_quaternion",
     "normalize_quaternion",
 ]
