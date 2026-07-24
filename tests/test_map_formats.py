@@ -7,6 +7,7 @@ from fourfury import (
     IdeArchetypeFlags,
     IdeDocument,
     IplDocument,
+    MloRegistry,
     WplBlock,
     WplCull,
     WplDocument,
@@ -17,9 +18,11 @@ from fourfury import (
     WplLodHierarchyError,
     WplLodIssueCode,
     WplLodParentScope,
+    WplMloPortal,
     WplParkedCar,
     WplStrBig,
     WplZone,
+    joaat,
 )
 
 
@@ -98,6 +101,74 @@ class IdeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not an archetype section"):
             tuple(document.iter_archetypes("txdp"))
 
+    def test_parses_complete_mlo_topology_and_preserves_edits(self) -> None:
+        source = (
+            "mlo\n"
+            "test_mlo, 0, 2, 1, 2, 100, 200, 300\n"
+            "chair, 1, 0, 0, 0, 0, 0, 1, 0, 384,\n"
+            "interior_lod, 0, 0, 0, 0, 0, 0, 1, 1, 384,\n"
+            "mloroomstart\n"
+            "limbo, 0, 1, 2, 2, 2, -2, -2, -2, 1, 0, 0\n"
+            "-1, -1\n"
+            "roomend\n"
+            "main, 2, 1, 2, 2, 2, -2, -2, -2, 1, 1234, 96\n"
+            "0, 1, -1\n"
+            "roomend\n"
+            "mloportalstart\n"
+            "1, 0, 0, 0, 0, 0, 0, 2, 0, 2, 2, 0, 2, 0, "
+            "-1, -1, -1, -1, 64, 3, 1\n"
+            "mloend\n"
+            "end\n"
+        )
+        document = IdeDocument.from_text(source, name="interior.ide")
+
+        self.assertEqual(document.to_text(), source)
+        self.assertEqual(len(document.mlo_archetypes), 1)
+        archetype = document.find_mlo_archetype("TEST_MLO")
+        assert archetype is not None
+        self.assertEqual(archetype.name_hash, joaat("test_mlo"))
+        self.assertEqual(archetype.hd_entity_count, 2)
+        self.assertEqual(archetype.lod_distances, (100.0, 200.0, 300.0))
+        self.assertEqual(archetype.lod_parent_indices, (1, None))
+        self.assertEqual(archetype.rooms[1].entity_ids, (0, 1))
+        self.assertEqual(archetype.portal_indices_for_room(1), (0,))
+        self.assertEqual(archetype.portals[0].corners[2], (0.0, 2.0, 2.0))
+        self.assertEqual(archetype.portals[0].active_hours, (0, 1))
+        self.assertEqual(archetype.validate(), ())
+
+        archetype.rooms[1].time_cycle_hash = 4321
+        reparsed = IdeDocument.from_text(document.to_text())
+        self.assertEqual(
+            reparsed.mlo_archetypes[0].rooms[1].time_cycle_hash,
+            4321,
+        )
+
+    def test_mlo_validation_reports_broken_cross_references(self) -> None:
+        document = IdeDocument.from_text(
+            "mlo\n"
+            "broken, 0, 1, 1, 0, 100, -1, -1\n"
+            "mloroomstart\n"
+            "room, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0\n"
+            "9, -1\n"
+            "roomend\n"
+            "mloportalstart\n"
+            "0, 4, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, "
+            "-1, -1, -1, -1, 0, 16777215, 1\n"
+            "mloend\n"
+            "end\n"
+        )
+
+        issues = document.mlo_archetypes[0].validate()
+
+        self.assertEqual(
+            {issue.code for issue in issues},
+            {
+                "room_portal_count",
+                "room_entity_reference",
+                "portal_room_reference",
+            },
+        )
+
 
 class IplTests(unittest.TestCase):
     def test_occluder_parsing_preserves_text_and_normalizes_geometry(self) -> None:
@@ -156,6 +227,8 @@ class WplTests(unittest.TestCase):
         self.assertEqual(parsed.parked_cars[0].model_hash, 0x12345678)
         self.assertEqual(parsed.culls[0].model_hash, 0xABCDEF01)
         self.assertEqual(parsed.strbig[0].model_name, "large_model")
+        self.assertIsInstance(parsed.mlo_portals[0], WplMloPortal)
+        self.assertIs(parsed.strbig[0], parsed.mlo_portals[0])
         self.assertEqual(parsed.lod_culls[0].model_names[-1], "lod_9")
         self.assertEqual(parsed.blocks[0].reserved_2, 2)
 
@@ -184,6 +257,48 @@ class WplTests(unittest.TestCase):
         self.assertIn(WplInstanceFlags.FULL_ROTATION, parsed.instances[0].flags)
         self.assertEqual(parsed.zones[0].max_z, 30.0)
         self.assertEqual(parsed.trailing_data, b"\0" * 16)
+
+    def test_resolves_mlo_placements_and_world_space_contents(self) -> None:
+        definitions = IdeDocument.from_text(
+            "mlo\n"
+            "test_mlo, 0, 2, 1, 2, 100, 200, 300\n"
+            "chair, 1, 0, 0, 0, 0, 0, 1, 0, 384\n"
+            "interior_lod, 0, 0, 0, 0, 0, 0, 1, 1, 384\n"
+            "mloroomstart\n"
+            "limbo, 0, 1, 2, 2, 2, -2, -2, -2, 1, 0, 0\n"
+            "-1\n"
+            "roomend\n"
+            "main, 2, 1, 2, 2, 2, -2, -2, -2, 1, 0, 0\n"
+            "0, 1, -1\n"
+            "roomend\n"
+            "mloportalstart\n"
+            "1, 0, 0, 0, 0, 0, 0, 2, 0, 2, 2, 0, 2, 0, "
+            "-1, -1, -1, -1, 64, 16777215, 1\n"
+            "mloend\n"
+            "end\n"
+        )
+        registry = MloRegistry.from_ide_documents((definitions,))
+        placement = WplInstance(
+            10.0, 20.0, 30.0,
+            0.0, 0.0, 2**-0.5, 2**-0.5,
+            joaat("test_mlo"),
+        )
+        document = WplDocument.empty()
+        document.add(placement)
+        document.add(self.make_instance(model_hash=joaat("ordinary_model")))
+
+        instances = document.resolve_mlos(registry)
+
+        self.assertEqual(len(instances), 1)
+        instance = instances[0]
+        self.assertEqual(instance.placement_index, 0)
+        self.assertAlmostEqual(instance.entities[0].position[0], 10.0)
+        self.assertAlmostEqual(instance.entities[0].position[1], 21.0)
+        self.assertAlmostEqual(instance.entities[0].position[2], 30.0)
+        self.assertEqual(instance.entities[0].lod_parent_index, 1)
+        self.assertEqual(instance.rooms[1].portal_ids, (0,))
+        self.assertEqual(instance.portals[0].corners[0], (10.0, 20.0, 30.0))
+        self.assertEqual(instance.to_data()["name"], "test_mlo")
 
     def test_instance_flags_have_explanations_and_editable_detail_level(self) -> None:
         instance = WplInstance(

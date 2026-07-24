@@ -16,9 +16,9 @@ animation dictionaries, and related metadata.
 | RPF2 | Yes | Yes | Search, extraction, creation, and unencrypted output |
 | RPF3 | Yes | No | Audio archives; hash-only names remain hexadecimal |
 | IMG3 | Yes | Yes | Search, extraction, creation, and resource padding handling |
-| IDE | Yes | Yes | Lossless sectioned text, including comments and MLO tokens |
+| IDE | Yes | Yes | Lossless definitions with explicit MLO entities, rooms, portals, and validation |
 | IPL | Yes | Yes | Lossless sectioned text with typed GTA IV OCCL boxes |
-| WPL | Yes | Yes | Placements, explicit LOD hierarchies, culls, garages, zones, and instance flags |
+| WPL | Yes | Yes | Placements, MLO resolution, explicit LOD hierarchies, world portals, and instance flags |
 | GTXD | Yes | Yes | Texture-parent chains and cycle detection |
 | NOD | Yes | Yes | Navigation nodes, links, costs, and topology validation |
 | WNV | Yes | Limited | Navigation meshes, edges, cover points, and quadtrees |

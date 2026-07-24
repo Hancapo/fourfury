@@ -31,8 +31,8 @@ has no target-game dependency.
 - Audio RPF3: reading and extraction. Names stored only as hashes are represented in hexadecimal.
 - IMG3: reading, searching, extraction, creation, and writing.
 - IPL: lossless sectioned text with typed `OCCL` occlusion boxes.
-- WPL: typed reading and writing for instances, garages, parked cars, culls, StrBig records, LOD culls, zones, and blocks.
-- IDE: lossless reading and writing of sectioned definition files, including comments, blank lines, and nested MLO tokens.
+- WPL: typed reading and writing for instances, garages, parked cars, culls, MLO world portals, LOD culls, zones, and blocks.
+- IDE: lossless definitions with typed archetypes and complete nested MLO entities, rooms, portals, and topology validation.
 - GTXD/`txdp`: typed child-to-parent texture dictionary hierarchies, lossless editing, chain resolution, and cycle detection.
 - NOD: typed vehicle and pedestrian navigation graphs with fixed-point positions, directed links, path costs, behavior-flag confidence metadata, and lossless editing.
 - WNV: typed RSC5 navigation meshes with quantized vertices, polygon flags, adjacency edges, cover points, and quadtrees, with lossless fixed-size editing.
@@ -153,6 +153,52 @@ dictionary binding without guessing a clip name. WDR shader parameters
 `global_animation_uv_0` and `global_animation_uv_1` are available together as
 `WdrShader.uv_transform`, using the same neutral `UvTransform` returned by WAD
 animation sampling.
+
+### MLO interiors
+
+IDE `mlo` sections are parsed as complete `MloArchetype` objects instead of
+being exposed only as unrelated CSV rows. Each archetype contains local
+`MloEntity`, `MloRoom`, and `MloPortal` records, declared counts, draw
+distances, room bounds, time-cycle hashes, room/entity membership, portal
+corners, and the room graph:
+
+```python
+from fourfury import IdeDocument, MloRegistry, WplDocument
+
+interiors = IdeDocument.from_path("bars_1.ide")
+for archetype in interiors.mlo_archetypes:
+    print(archetype.name, len(archetype.rooms), len(archetype.portals))
+    print("LOD parents", archetype.lod_parent_indices)
+    for room in archetype.rooms:
+        print(room.name, room.entity_ids)
+    for issue in archetype.validate():
+        print(issue.code, issue.message)
+
+registry = MloRegistry.from_ide_documents((interiors,))
+wpl = WplDocument.from_path("bars_1.wpl")
+for instance in wpl.resolve_mlos(registry):
+    print(instance.archetype.name, instance.position)
+    print(instance.entities[0].position)  # world coordinates
+    print(instance.rooms[0].corners)
+    print(instance.portals[0].corners)
+```
+
+MLO entities and topology remain in archetype-local coordinates. A resolved
+`MloInstance` applies the serialized WPL placement quaternion and translation
+to entities, all eight room-bound corners, and all four portal corners.
+Internal entity LOD parents follow the MLO level-0 → level-1 → level-2
+relationship explicitly and are included in `to_data()` output.
+
+`MloRegistry` uses lowercase JOAAT names to match normal WPL section-0
+placements. When several loaded IDE files define the same hash, later
+documents take precedence and `duplicate_hashes` keeps the collision visible.
+WPL section 8 is exposed separately as `WplMloPortal`; the old `WplStrBig`
+name remains a compatibility alias.
+
+The typed MLO records wrap the original `IdeEntry` objects. Editing their
+names, vectors, flags, bounds, counts, or scalar parameters therefore writes
+back through the normal lossless IDE writer. The current convenience API does
+not add or remove nested MLO records.
 
 ### WPL LOD parenting
 
