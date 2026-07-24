@@ -16,6 +16,7 @@ from .constants import (
     WDR_VERTEX_BUFFER_SIZE,
 )
 from .geometry import (
+    _LazyAttributeChannels,
     VertexValue,
     WdrDrawableLod,
     WdrDrawableModel,
@@ -53,6 +54,87 @@ try:
     from .._native import decode_wdr_vertices as _native_decode_wdr_vertices
 except ImportError:
     _native_decode_wdr_vertices = None
+
+
+def _decode_dec3n(value: int) -> tuple[float, float, float, float]:
+    result: list[float] = []
+    for shift in (0, 10, 20):
+        component = (value >> shift) & 0x3FF
+        signed = component if component < 0x200 else component - 0x400
+        result.append(max(-1.0, signed / 511.0))
+    w_bits = (value >> 30) & 0x3
+    result.append(-1.0 if w_bits == 3 else float(w_bits))
+    return tuple(result)  # type: ignore[return-value]
+
+
+def _decode_vertex_attributes(
+    data: bytes,
+    base: int,
+    layout: WdrVertexLayout,
+) -> dict[WdrVertexSemantic, VertexValue]:
+    attributes: dict[WdrVertexSemantic, VertexValue] = {}
+    for element in layout.elements:
+        offset = base + element.offset
+        element_type = element.element_type
+        if element_type == WdrVertexElementType.HALF2:
+            value: VertexValue = struct.unpack_from("<2e", data, offset)
+        elif element_type == WdrVertexElementType.HALF4:
+            value = struct.unpack_from("<4e", data, offset)
+        elif element_type in (
+            WdrVertexElementType.FLOAT,
+            WdrVertexElementType.FLOAT_SINGLE,
+        ):
+            value = struct.unpack_from("<f", data, offset)[0]
+        elif element_type == WdrVertexElementType.FLOAT2:
+            value = struct.unpack_from("<2f", data, offset)
+        elif element_type == WdrVertexElementType.FLOAT3:
+            value = struct.unpack_from("<3f", data, offset)
+        elif element_type == WdrVertexElementType.FLOAT4:
+            value = struct.unpack_from("<4f", data, offset)
+        elif element_type in (
+            WdrVertexElementType.UBYTE4,
+            WdrVertexElementType.COLOR,
+        ):
+            value = struct.unpack_from("<4B", data, offset)
+        elif element_type == WdrVertexElementType.DEC3N:
+            value = _decode_dec3n(struct.unpack_from("<I", data, offset)[0])
+        else:  # pragma: no cover - parse_layout rejects these first
+            raise ValueError(f"unsupported WDR vertex element type: {element_type}")
+        attributes[element.semantic] = value
+    return attributes
+
+
+def _decode_vertex_channels(
+    data: bytes,
+    vertex_count: int,
+    stride: int,
+    layout: WdrVertexLayout,
+    native_decoder_provider: Callable[[], object | None],
+) -> dict[WdrVertexSemantic, tuple[VertexValue, ...]]:
+    native_decoder = native_decoder_provider()
+    if native_decoder is not None:
+        decoded = native_decoder(
+            data,
+            vertex_count,
+            stride,
+            tuple(
+                (int(element.semantic), int(element.element_type), element.offset)
+                for element in layout.elements
+            ),
+        )
+        return {
+            WdrVertexSemantic(int(semantic)): tuple(values)
+            for semantic, values in decoded.items()
+        }
+
+    channels: dict[WdrVertexSemantic, list[VertexValue]] = {
+        element.semantic: [] for element in layout.elements
+    }
+    for index in range(vertex_count):
+        attributes = _decode_vertex_attributes(data, index * stride, layout)
+        for semantic, value in attributes.items():
+            channels[semantic].append(value)
+    return {semantic: tuple(values) for semantic, values in channels.items()}
 
 
 class _WdrReader:
@@ -183,14 +265,7 @@ class _WdrReader:
 
     @staticmethod
     def _decode_dec3n(value: int) -> tuple[float, float, float, float]:
-        result: list[float] = []
-        for shift in (0, 10, 20):
-            component = (value >> shift) & 0x3FF
-            signed = component if component < 0x200 else component - 0x400
-            result.append(max(-1.0, signed / 511.0))
-        w_bits = (value >> 30) & 0x3
-        result.append(-1.0 if w_bits == 3 else float(w_bits))
-        return tuple(result)  # type: ignore[return-value]
+        return _decode_dec3n(value)
 
     def decode_vertex_attributes(
         self,
@@ -198,30 +273,7 @@ class _WdrReader:
         base: int,
         layout: WdrVertexLayout,
     ) -> dict[WdrVertexSemantic, VertexValue]:
-        attributes: dict[WdrVertexSemantic, VertexValue] = {}
-        for element in layout.elements:
-            offset = base + element.offset
-            element_type = element.element_type
-            if element_type == WdrVertexElementType.HALF2:
-                value: VertexValue = struct.unpack_from("<2e", data, offset)
-            elif element_type == WdrVertexElementType.HALF4:
-                value = struct.unpack_from("<4e", data, offset)
-            elif element_type in (WdrVertexElementType.FLOAT, WdrVertexElementType.FLOAT_SINGLE):
-                value = struct.unpack_from("<f", data, offset)[0]
-            elif element_type == WdrVertexElementType.FLOAT2:
-                value = struct.unpack_from("<2f", data, offset)
-            elif element_type == WdrVertexElementType.FLOAT3:
-                value = struct.unpack_from("<3f", data, offset)
-            elif element_type == WdrVertexElementType.FLOAT4:
-                value = struct.unpack_from("<4f", data, offset)
-            elif element_type in (WdrVertexElementType.UBYTE4, WdrVertexElementType.COLOR):
-                value = struct.unpack_from("<4B", data, offset)
-            elif element_type == WdrVertexElementType.DEC3N:
-                value = self._decode_dec3n(struct.unpack_from("<I", data, offset)[0])
-            else:  # pragma: no cover - parse_layout rejects these first
-                raise ValueError(f"unsupported WDR vertex element type: {element_type}")
-            attributes[element.semantic] = value
-        return attributes
+        return _decode_vertex_attributes(data, base, layout)
 
     def decode_vertex(self, data: bytes, base: int, layout: WdrVertexLayout) -> WdrVertex:
         attributes = self.decode_vertex_attributes(data, base, layout)
@@ -234,30 +286,13 @@ class _WdrReader:
         stride: int,
         layout: WdrVertexLayout,
     ) -> dict[WdrVertexSemantic, tuple[VertexValue, ...]]:
-        native_decoder = self._native_decoder_provider()
-        if native_decoder is not None:
-            decoded = native_decoder(
-                data,
-                vertex_count,
-                stride,
-                tuple(
-                    (int(element.semantic), int(element.element_type), element.offset)
-                    for element in layout.elements
-                ),
-            )
-            return {
-                WdrVertexSemantic(int(semantic)): tuple(values)
-                for semantic, values in decoded.items()
-            }
-
-        channels: dict[WdrVertexSemantic, list[VertexValue]] = {
-            element.semantic: [] for element in layout.elements
-        }
-        for index in range(vertex_count):
-            attributes = self.decode_vertex_attributes(data, index * stride, layout)
-            for semantic, value in attributes.items():
-                channels[semantic].append(value)
-        return {semantic: tuple(values) for semantic, values in channels.items()}
+        return _decode_vertex_channels(
+            data,
+            vertex_count,
+            stride,
+            layout,
+            self._native_decoder_provider,
+        )
 
     def parse_vertex_buffer(self, pointer: int) -> WdrVertexBuffer:
         if pointer in self.vertex_buffers:
@@ -289,8 +324,17 @@ class _WdrReader:
                 else self.read(vertex_data_pointer, data_size, "WDR vertex data")
             )
         primary = locked_data or vertex_data
+        decoder_provider = self._native_decoder_provider
         attribute_channels = (
-            self.decode_vertex_channels(primary, vertex_count, stride, layout)
+            _LazyAttributeChannels(
+                lambda: _decode_vertex_channels(
+                    primary,
+                    vertex_count,
+                    stride,
+                    layout,
+                    decoder_provider,
+                )
+            )
             if primary
             else {}
         )
