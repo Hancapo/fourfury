@@ -469,10 +469,17 @@ value, while animations with neither row are rejected explicitly.
 Static float, integer, vector, and quaternion channels are decoded. Raw float
 and integer arrays and packed quantized floats are also materialized, so
 `vector_at()` and `sample()` can evaluate normal transform tracks without a game
-runtime. RLE integer channels expose their distinct values and decoded signed
-packed sequence. Their runtime timing expansion is not currently modeled;
-calling `value_at()` for such a channel raises `NotImplementedError` instead of
-returning guessed frame data.
+runtime. RLE integer channels expose their distinct `run_values` and decoded
+`run_lengths`; `value_at(frame)` evaluates them with the same run-boundary
+behavior as the GTA IV runtime. The original packed words, bit count, and Rice
+divisor remain available for low-level inspection.
+
+Known but undecoded channel encodings, and channel type bytes unknown to this
+version of FourFury, no longer prevent the containing WAD from loading.
+`channel_type_value`, `channel_type_name`, `is_supported`, and `header_bytes`
+preserve inspectable metadata. Evaluation still raises `NotImplementedError`
+explicitly, while `WadDocument.audit()` lists unsupported channel names and
+emits structured warnings. The original resource remains lossless.
 
 The WAD API is a read-only semantic view. `to_bytes()` and `save()` preserve the
 original compressed RSC5 resource exactly.

@@ -6,6 +6,7 @@ import unittest
 import zlib
 from dataclasses import replace
 
+import fourfury.wad as wad_module
 from fourfury import (
     WAD_RESOURCE_VERSION,
     WadAnimation,
@@ -143,7 +144,7 @@ def _sample_wad(*, hash_count: int = 1, animation_count: int = 1) -> bytes:
         2,
     )
     struct.pack_into("<2i", virtual, 0x760, 2048, 0)
-    struct.pack_into("<I", virtual, 0x770, 0b0111)
+    struct.pack_into("<I", virtual, 0x770, 0b01010011)
 
     struct.pack_into(
         "<IBBHIHH",
@@ -446,16 +447,49 @@ class WadTests(unittest.TestCase):
         rle, raw = action.channels
 
         self.assertEqual(rle.run_values, (2048, 0))
-        self.assertEqual(rle.packed_sequence, (3,))
-        self.assertEqual(rle.packed_sequence_words, (0b0111,))
+        self.assertEqual(rle.run_lengths, (1, 2))
+        self.assertEqual(rle.packed_sequence, (1, 2))
+        self.assertEqual(rle.packed_sequence_words, (0b01010011,))
         self.assertEqual(rle.packed_sequence_bit_count, 8)
         self.assertEqual(rle.packed_sequence_divisor, 2)
-        with self.assertRaisesRegex(NotImplementedError, "timing expansion"):
-            rle.value_at(0)
+        self.assertEqual(tuple(rle.value_at(frame) for frame in range(4)), (2048, 0, 0, 0))
         self.assertEqual(raw.values, (7, 8, 9))
         self.assertEqual(raw.value_at(1), 8)
         self.assertEqual(action.bone_id.track, WadTrackId.ACTION_FLAGS)
         self.assertFalse(action.bone_id.is_skeletal_transform)
+
+    def test_decodes_rle_prefix_before_remainder(self) -> None:
+        # divisor=2, runs=(8, 2): 001 00 0, 1 01 0 in read order.
+        words = (0b0101000100,)
+
+        self.assertEqual(
+            wad_module._WadReader._decode_packed_sequence(words, 10, 2, 2),
+            (8, 2),
+        )
+
+    def test_preserves_unknown_channel_headers_for_lossless_inspection(self) -> None:
+        source = _sample_wad()
+        virtual = bytearray(zlib.decompress(source[12:]))
+        struct.pack_into("<B", virtual, 0x465, 0xFF)
+        unknown_source = source[:12] + zlib.compress(virtual)
+
+        document = WadDocument.from_bytes(unknown_source, name="unknown.wad")
+        channel = document.animations[0].tracks[0].chunks[0].channels[2]
+
+        self.assertEqual(channel.channel_type_value, 0xFF)
+        self.assertEqual(channel.channel_type_name, "UNKNOWN_255")
+        self.assertFalse(channel.is_supported)
+        self.assertEqual(channel.header_bytes, bytes(virtual[0x460:0x468]))
+        with self.assertRaisesRegex(NotImplementedError, "UNKNOWN_255"):
+            channel.value_at(0)
+        report = document.audit()
+        self.assertEqual(report.unsupported_channel_types, ("UNKNOWN_255",))
+        self.assertEqual(report.channel_types["UNKNOWN_255"], 1)
+        self.assertIn(
+            "unsupported_channel_type",
+            {issue.code for issue in report.issues},
+        )
+        self.assertEqual(document.to_bytes(), unknown_source)
 
     def test_models_uv_identity_without_misclassifying_it_as_integer(self) -> None:
         identifier = WadBoneId(WadTrackId.SHADER_SLIDE_U, 0xFF, 3)

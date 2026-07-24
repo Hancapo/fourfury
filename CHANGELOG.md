@@ -11,6 +11,8 @@ The changelog is release-oriented and uses a small fixed set of categories:
 - WAD animation dictionary reading with named track metadata, decoded channels, hash lookup, and frame sampling.
 - Format-neutral arbitrary WAD tracks, sparse frames, interpolation, and primitive-data export.
 - Structured WAD track classification, validation diagnostics, and dictionary audit reports.
+- Runtime-compatible WAD RLE integer channel decoding and frame evaluation.
+- Lossless inspection and audit reporting for unsupported WAD channel encodings.
 - Target-independent UV animation clips, affine transforms, sampling, and primitive-data export.
 - Target-independent skeletal poses and clips with explicit mover/root-motion tracks.
 - Optional skeletal-animation binding with hierarchy, skeleton signatures, and bind-pose matrices.
@@ -24,6 +26,7 @@ The changelog is release-oriented and uses a small fixed set of categories:
 - WAD UV targets are identified explicitly instead of being reported as integer tracks.
 - WAD skeletal targets remain stable when their per-chunk encoding changes, and sampled quaternions now use normalized shortest-path interpolation.
 - WAD action-flags tracks are no longer misclassified as bone translations.
+- WAD packed integer sequences decode their unary prefix before the Rice remainder.
 
 ## [0.1.0] - 2026-07-22
 
