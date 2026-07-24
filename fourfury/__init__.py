@@ -360,7 +360,7 @@ from .wpl_lod import (
     WplLodParentScope,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "AnimationScalar", "AnimationTrackFrame", "AnimationTrackInterpolation",
