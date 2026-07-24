@@ -4,6 +4,7 @@ import struct
 import unittest
 
 from fourfury import (
+    IdeArchetypeFlags,
     IdeDocument,
     IplDocument,
     WplBlock,
@@ -60,6 +61,42 @@ class IdeTests(unittest.TestCase):
         reparsed = IdeDocument.from_text(document.to_text())
 
         self.assertEqual(reparsed.get_entries("objs")[0].values[0], 'model, "variant"')
+
+    def test_models_uv_animated_archetypes_and_edits_flags_losslessly(self) -> None:
+        source = (
+            "anim\n"
+            "screen, screen_txd, screen_anims, 100, 1536\n"
+            "static_sign, sign_txd, sign_anims, 80, 0\n"
+            "end\n"
+        )
+        document = IdeDocument.from_text(source)
+
+        screen = document.find_archetype("SCREEN")
+        assert screen is not None
+        self.assertEqual(screen.animation_dictionary, "screen_anims")
+        self.assertEqual(screen.uv_animation_dictionary, "screen_anims")
+        self.assertTrue(screen.has_animation)
+        self.assertTrue(screen.has_uv_animation)
+        self.assertEqual(
+            screen.flags,
+            IdeArchetypeFlags.HAS_ANIMATION | IdeArchetypeFlags.HAS_UV_ANIMATION,
+        )
+        self.assertEqual(document.uv_animated_archetypes, (screen,))
+
+        screen.flags &= ~IdeArchetypeFlags.HAS_UV_ANIMATION
+        self.assertFalse(screen.has_uv_animation)
+        self.assertIsNone(screen.uv_animation_dictionary)
+        reparsed = IdeDocument.from_bytes(document.to_bytes())
+        self.assertEqual(
+            reparsed.find_archetype("screen").flags,  # type: ignore[union-attr]
+            IdeArchetypeFlags.HAS_ANIMATION,
+        )
+
+    def test_rejects_non_archetype_sections_for_typed_iteration(self) -> None:
+        document = IdeDocument.from_text("txdp\nchild, parent\nend\n")
+
+        with self.assertRaisesRegex(ValueError, "not an archetype section"):
+            tuple(document.iter_archetypes("txdp"))
 
 
 class IplTests(unittest.TestCase):

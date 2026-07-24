@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import BinaryIO, Iterator
 
 from ._utils import atomic_write
+from .animation import UvTransform
 from .model import (
     ModelAabb,
     ModelAsset,
@@ -602,6 +603,46 @@ class WdrShader:
                 if parameter.name.casefold() == key
             ),
             None,
+        )
+
+    @property
+    def has_uv_transform_parameters(self) -> bool:
+        return any(
+            self.get_parameter(name) is not None
+            for name in (
+                WdrShaderParameterName.GLOBAL_ANIMATION_UV_0,
+                WdrShaderParameterName.GLOBAL_ANIMATION_UV_1,
+            )
+        )
+
+    @property
+    def uv_transform(self) -> UvTransform | None:
+        """Return the material's two default UV-animation matrix rows."""
+
+        row_u_parameter = self.get_parameter(
+            WdrShaderParameterName.GLOBAL_ANIMATION_UV_0
+        )
+        row_v_parameter = self.get_parameter(
+            WdrShaderParameterName.GLOBAL_ANIMATION_UV_1
+        )
+        if row_u_parameter is None and row_v_parameter is None:
+            return None
+
+        def row(
+            parameter: WdrShaderParameter | None,
+            default: tuple[float, float, float, float],
+            name: str,
+        ) -> tuple[float, float, float, float]:
+            if parameter is None:
+                return default
+            if not isinstance(parameter.value, WdrVector4):
+                raise ValueError(f"WDR {name} parameter is not a float4 value")
+            return tuple(parameter.value)
+
+        identity = UvTransform.identity()
+        return UvTransform(
+            row(row_u_parameter, identity.row_u, "global_animation_uv_0"),
+            row(row_v_parameter, identity.row_v, "global_animation_uv_1"),
         )
 
     def to_model_material(self, *, index: int | None = None) -> ModelMaterial:

@@ -123,6 +123,9 @@ ide = IdeDocument.from_path(game / "pc/data/maps/manhat/manhat01.ide")
 for entry in ide.iter_entries("objs"):
     print(entry.values[0])
 
+for archetype in ide.uv_animated_archetypes:
+    print(archetype.name, archetype.uv_animation_dictionary)
+
 wpl = WplDocument.from_path(game / "pc/data/maps/manhat/manhat01.wpl")
 for instance in wpl.instances:
     print(hex(instance.model_hash), instance.flags, instance.lod_index, instance.lod_distance)
@@ -142,6 +145,14 @@ wpl.save("example.wpl")
 ```
 
 The WPL writer preserves trailing bytes such as the sector padding found in some stock files. The IDE writer preserves original lines byte-for-byte until their parsed values are modified.
+
+`IdeDocument.archetypes` provides typed, editable views for `objs`, `tobj`,
+`anim`, and `tanm`. `IdeArchetypeFlags.HAS_UV_ANIMATION` names bit 10 explicitly;
+`uv_animated_archetypes` and `uv_animation_dictionary` expose the external
+dictionary binding without guessing a clip name. WDR shader parameters
+`global_animation_uv_0` and `global_animation_uv_1` are available together as
+`WdrShader.uv_transform`, using the same neutral `UvTransform` returned by WAD
+animation sampling.
 
 ### WPL LOD parenting
 
