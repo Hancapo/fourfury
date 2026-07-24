@@ -30,6 +30,7 @@ has no target-game dependency.
 - RPF2: reading, searching, extraction, creation, and writing.
 - Audio RPF3: reading and extraction. Names stored only as hashes are represented in hexadecimal.
 - IMG3: reading, searching, extraction, creation, and writing.
+- IPL: lossless sectioned text with typed `OCCL` occlusion boxes.
 - WPL: typed reading and writing for instances, garages, parked cars, culls, StrBig records, LOD culls, zones, and blocks.
 - IDE: lossless reading and writing of sectioned definition files, including comments, blank lines, and nested MLO tokens.
 - GTXD/`txdp`: typed child-to-parent texture dictionary hierarchies, lossless editing, chain resolution, and cycle detection.
@@ -116,7 +117,7 @@ The convenience APIs `RpfArchive.from_folder(...)`, `ImgArchive.from_folder(...)
 ## Map definitions and placements
 
 ```python
-from fourfury import IdeDocument, WplDocument
+from fourfury import IdeDocument, IplDocument, WplDocument
 
 ide = IdeDocument.from_path(game / "pc/data/maps/manhat/manhat01.ide")
 for entry in ide.iter_entries("objs"):
@@ -125,6 +126,10 @@ for entry in ide.iter_entries("objs"):
 wpl = WplDocument.from_path(game / "pc/data/maps/manhat/manhat01.wpl")
 for instance in wpl.instances:
     print(hex(instance.model_hash), instance.flags, instance.lod_index, instance.lod_distance)
+
+ipl = IplDocument.from_path(game / "common/data/maps/occlu.ipl")
+for occluder in ipl.occluders:
+    print(occluder.center, occluder.size, occluder.rotation)
 
 hierarchy = wpl.build_lod_hierarchy(strict=True)
 for root in hierarchy.roots:

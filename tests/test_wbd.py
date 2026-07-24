@@ -40,6 +40,10 @@ class WbdTests(unittest.TestCase):
         source = _sample_wbd()
         document = WbdDocument.from_bytes(source, name="sample.wbd")
 
+        self.assertEqual(
+            WbdDocument.hashes_from_bytes(source),
+            (joaat("compound"), joaat("mesh")),
+        )
         self.assertEqual(document.name, "sample.wbd")
         self.assertEqual(len(document), 2)
         self.assertEqual(document.hashes, (joaat("compound"), joaat("mesh")))

@@ -15,10 +15,10 @@ from fourfury import (
 
 
 class ShaderCatalogTests(unittest.TestCase):
-    def test_contains_complete_edition_presets_and_programs(self) -> None:
-        self.assertEqual(len(WdrShaderPreset), 134)
-        self.assertEqual(len(WdrShaderProgram), 71)
-        self.assertEqual(len(WDR_SHADER_DEFINITIONS), 134)
+    def test_contains_recognized_presets_and_programs(self) -> None:
+        self.assertEqual(len(WdrShaderPreset), 137)
+        self.assertEqual(len(WdrShaderProgram), 74)
+        self.assertEqual(len(WDR_SHADER_DEFINITIONS), 137)
         self.assertIn(WdrShaderPreset.GTA_TREES_EXTENDED, WDR_SHADER_DEFINITIONS)
 
     def test_resolves_preset_aliases_and_paths(self) -> None:

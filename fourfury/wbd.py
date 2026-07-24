@@ -118,6 +118,44 @@ class WbdDocument:
             _entry_count=bound_count,
         )
 
+    @classmethod
+    def hashes_from_bytes(cls, data: bytes) -> tuple[int, ...]:
+        """Read only dictionary hashes without constructing any collision bounds."""
+        resource = Rsc5Resource.from_bytes(data)
+        if resource.version != WBD_RESOURCE_VERSION:
+            raise ValueError(f"unsupported WBD resource version: {resource.version:#x}")
+        if resource.physical_data:
+            raise ValueError("WBD resources with physical allocations are not supported")
+        virtual = resource.virtual_data
+        if len(virtual) < WBD_DICTIONARY_SIZE:
+            raise ValueError("truncated WBD bounds dictionary")
+
+        hashes_pointer, hash_count, hash_capacity = struct.unpack_from(
+            "<IHH", virtual, 16
+        )
+        _bounds_pointer, bound_count, bound_capacity = struct.unpack_from(
+            "<IHH", virtual, 24
+        )
+        if hash_count > hash_capacity:
+            raise ValueError("WBD hash count exceeds its capacity")
+        if bound_count > bound_capacity:
+            raise ValueError("WBD bound count exceeds its capacity")
+        if hash_count != bound_count:
+            raise ValueError("WBD hash and bound counts do not match")
+        if not hash_count:
+            return ()
+        hashes_offset = rsc5_pointer_offset(hashes_pointer)
+        if hashes_offset + hash_count * 4 > len(virtual):
+            raise ValueError("WBD hash array exceeds the virtual allocation")
+        return tuple(
+            int(value)
+            for value in struct.unpack_from(
+                f"<{hash_count}I",
+                virtual,
+                hashes_offset,
+            )
+        )
+
     def __len__(self) -> int:
         return len(self.entries)
 

@@ -9,6 +9,7 @@ from .gtxd import (
 )
 from .img import IMG3_ENTRY_SIZE, IMG3_MAGIC, IMG3_VERSION, ImgArchive, ImgEntry, create_img, load_img
 from .ide import IdeDocument, IdeEntry, IdeLine, create_ide, load_ide
+from .ipl import IplDocument, IplOccluder, create_ipl, load_ipl
 from .materials import WbnMaterialType
 from .model import (
     ModelAabb,
@@ -181,7 +182,9 @@ from .wdr import (
     WdrGeometry,
     WdrIndexBuffer,
     WdrLight,
+    WdrLightFlags,
     WdrLightType,
+    WdrLightTypeFlags,
     WdrLodLevel,
     WdrMatrix4,
     WdrPrimitiveType,
@@ -298,6 +301,7 @@ __all__ = [
     "GTAIVCrypto", "GTAIV_AES_KEY", "GTAIV_KEY_SHA1", "GTXD_SECTION", "GtxdDependency",
     "GtxdDocument", "GtxdHierarchy", "IMG3_ENTRY_SIZE", "IMG3_MAGIC",
     "IMG3_VERSION", "IdeDocument", "IdeEntry", "IdeLine", "ImgArchive", "ImgEntry",
+    "IplDocument", "IplOccluder",
     "ModelAabb", "ModelAsset", "ModelBone", "ModelBoundingSphere",
     "ModelColor", "ModelColorChannel", "ModelCoordinateSystem", "ModelLight",
     "ModelLightType", "ModelLod", "ModelMaterial", "ModelMaterialParameter",
@@ -334,7 +338,8 @@ __all__ = [
     "WDR_SHADER_SIZE", "WDR_VERTEX_BUFFER_SIZE", "WDR_VERTEX_LAYOUT_SIZE",
     "WDR_SHADER_DEFINITIONS", "WDR_SHADER_PRESETS_BY_PROGRAM", "WdrBone",
     "WdrBoneFlags", "WdrBoneId", "WdrDocument", "WdrDrawable", "WdrDrawableLod", "WdrDrawableModel",
-    "WdrGeometry", "WdrIndexBuffer", "WdrLight", "WdrLightType", "WdrLodLevel",
+    "WdrGeometry", "WdrIndexBuffer", "WdrLight", "WdrLightFlags", "WdrLightType",
+    "WdrLightTypeFlags", "WdrLodLevel",
     "WdrShaderDefault", "WdrShaderDefaultKind", "WdrShaderDefaultValue",
     "WdrShaderDefinition",
     "WdrShaderParameterName", "WdrShaderPreset", "WdrShaderProgram",
@@ -358,10 +363,10 @@ __all__ = [
     "WplLodCull", "WplLodEdge", "WplLodHierarchy", "WplLodHierarchyError", "WplLodIssue",
     "WplLodIssueCode", "WplLodNode", "WplLodParentScope", "WplParkedCar", "WplStrBig",
     "WplTimeCycleModifier", "WplZone",
-    "combine_nod_graphs", "combine_path_graphs", "create_gtxd", "create_ide", "create_img", "create_rpf", "create_wpl", "joaat",
+    "combine_nod_graphs", "combine_path_graphs", "create_gtxd", "create_ide", "create_img", "create_ipl", "create_rpf", "create_wpl", "joaat",
     "explain_instance_flags", "explain_node_flags", "find_wdr_shader_definition",
     "find_wdr_shader_program",
-    "extract_aes_key", "load_ide", "load_img", "load_nod", "load_nod_graph", "load_rpf", "load_wbn",
+    "extract_aes_key", "load_ide", "load_img", "load_ipl", "load_nod", "load_nod_graph", "load_rpf", "load_wbn",
     "load_gtxd", "load_wad", "load_wbd", "load_wdd", "load_wdr", "load_wft", "load_wnv", "load_wpl", "load_wtd", "read_rsc5_texture_dictionary",
     "rsc5_physical_size", "rsc5_pointer_offset", "rsc5_virtual_size",
 ]
