@@ -10,6 +10,8 @@ from fourfury.wdr import (
     WdrBoneFlags,
     WdrDocument,
     WdrLightType,
+    WdrLightFlags,
+    WdrLightTypeFlags,
     WdrLodLevel,
     WdrShaderParameter,
     WdrVertex,
@@ -413,6 +415,8 @@ class WdrTests(unittest.TestCase):
         self.assertEqual(tuple(light.position), (1.0, 2.0, 3.0))
         self.assertEqual(light.color, (255, 128, 64, 255))
         self.assertEqual(light.bone_id, 2)
+        self.assertIsInstance(light.flags, WdrLightFlags)
+        self.assertIsInstance(light.flashiness, WdrLightTypeFlags)
 
     def test_loads_from_binary_stream(self) -> None:
         document = load_wdr(io.BytesIO(_sample_wdr()))

@@ -5,6 +5,7 @@ import unittest
 
 from fourfury import (
     IdeDocument,
+    IplDocument,
     WplBlock,
     WplCull,
     WplDocument,
@@ -59,6 +60,32 @@ class IdeTests(unittest.TestCase):
         reparsed = IdeDocument.from_text(document.to_text())
 
         self.assertEqual(reparsed.get_entries("objs")[0].values[0], 'model, "variant"')
+
+
+class IplTests(unittest.TestCase):
+    def test_occluder_parsing_preserves_text_and_normalizes_geometry(self) -> None:
+        source = (
+            b"# Visual occlusion\r\n"
+            b"occl\r\n"
+            b"10.0, 20.0, 30.0, 8.0, 6.0, -10.0, 45.0, 0.0, 0.0, 0\r\n"
+            b"end\r\n"
+        )
+
+        document = IplDocument.from_bytes(source, name="occlu.ipl")
+
+        self.assertEqual(document.to_bytes(), source)
+        self.assertEqual(len(document.occluders), 1)
+        occluder = document.occluders[0]
+        self.assertEqual(occluder.center, (10.0, 20.0, 25.0))
+        self.assertEqual(occluder.size, (8.0, 6.0, 10.0))
+        self.assertEqual(occluder.rotation, 45.0)
+        self.assertEqual(occluder.flags, 0)
+
+    def test_occluder_requires_all_ten_fields(self) -> None:
+        document = IplDocument.from_text("occl\n1, 2, 3\nend\n")
+
+        with self.assertRaisesRegex(ValueError, "requires exactly 10 values"):
+            _ = document.occluders
 
 
 class WplTests(unittest.TestCase):

@@ -78,6 +78,27 @@ WDR_SHADER_PARAMETER_NAMES: dict[int, str] = {
     0x2420AFD1: "texture_sampler_layer_1",
     0x31934AB6: "texture_sampler_layer_2",
     0x78B758FD: "texture_sampler_layer_3",
+    0x3FFF9563: "bump_sampler_layer_0",
+    0x54CDBEFF: "bump_sampler_layer_1",
+    0xA3A2DCA8: "bump_sampler_layer_2",
+    0xB1597815: "bump_sampler_layer_3",
+    0x60D59498: "spec_sampler_layer_0",
+    0x731BB924: "spec_sampler_layer_1",
+    0x44A8DC3F: "spec_sampler_layer_2",
+    0x69382509: "spec_sampler_layer_3",
+    0x88CC3D90: "lookup_sampler",
+    0x1D976344: "specular_factor_layer_0",
+    0xB099893E: "specular_factor_layer_1",
+    0xA884F919: "specular_factor_layer_2",
+    0x3AD09DAE: "specular_factor_layer_3",
+    0x634D3440: "specular_color_factor_layer_0",
+    0x6506B7CB: "specular_color_factor_layer_1",
+    0x524C1256: "specular_color_factor_layer_2",
+    0x3FA1ECE6: "specular_color_factor_layer_3",
+    0x8FBCF203: "bumpiness_layer_0",
+    0x81435510: "bumpiness_layer_1",
+    0x2C03AA96: "bumpiness_layer_2",
+    0x1DC50E19: "bumpiness_layer_3",
     0xF6712B81: "bumpiness",
     0xFF11711D: "spec_map_intensity_mask",
     0x166E0FD1: "specular_factor",
@@ -1055,6 +1076,50 @@ class WdrLightType(IntEnum):
     SPOT = 2
 
 
+class WdrLightFlags(IntFlag):
+    """GTA IV drawable-light behavior flags used by GIMS IV."""
+
+    RANDOM_FLASHING_1 = 1 << 0
+    RANDOM_FLASHING_2 = 1 << 1
+    HAZARD_FLASHING_1 = 1 << 2
+    SLOW_HAZARD_FLASHING = 1 << 3
+    VERY_SLOW_HAZARD_FLASHING = 1 << 4
+    ALL_DAY = 1 << 5
+    NIGHT_ONLY = 1 << 6
+    WEAK_LIGHT = 1 << 7
+    VERY_FAST_HAZARD_FLASHING = 1 << 8
+    FAST_HAZARD_FLASHING = 1 << 9
+    VERY_SLOW_FADE_1 = 1 << 10
+    VERY_SLOW_FADE_2 = 1 << 11
+    SLOW_FADE = 1 << 12
+    HAZARD_FLASHING_2 = 1 << 13
+    TINY_FLICKERING = 1 << 14
+    DYNAMIC_SHADOW = 1 << 15
+    WEATHER_MODIFIED_COLOR = 1 << 16
+    UNKNOWN_18 = 1 << 17
+    UNKNOWN_19 = 1 << 18
+    SHOW_RAYS = 1 << 19
+    NO_CORONA_REFLECTION = 1 << 20
+    UNKNOWN_22 = 1 << 21
+    UNKNOWN_23 = 1 << 22
+    UNKNOWN_24 = 1 << 23
+    UNKNOWN_25 = 1 << 24
+    UNKNOWN_26 = 1 << 25
+    UNKNOWN_27 = 1 << 26
+    UNKNOWN_28 = 1 << 27
+    UNKNOWN_29 = 1 << 28
+    UNKNOWN_30 = 1 << 29
+    UNKNOWN_31 = 1 << 30
+    UNKNOWN_32 = 1 << 31
+
+
+class WdrLightTypeFlags(IntFlag):
+    FIVE_SECONDS_ON_THREE_SECONDS_FLICKER_1 = 1 << 0
+    FIVE_SECONDS_ON_THREE_SECONDS_FLICKER_2 = 1 << 1
+    ONE_SECOND_ON_OFF = 1 << 2
+    OFF = 1 << 3
+
+
 @dataclass(frozen=True, slots=True)
 class WdrLight:
     position: WdrVector3
@@ -1069,10 +1134,10 @@ class WdrLight:
     corona_size: float
     hotspot_angle: float
     falloff_angle: float
-    flags: int
+    flags: WdrLightFlags
     corona_hash: int
     luminosity_hash: int
-    flashiness: int
+    flashiness: WdrLightTypeFlags
     light_type: WdrLightType | int
     corona_hdr_multiplier: float
     fade_distance: float
@@ -1106,7 +1171,7 @@ class WdrLight:
             inner_cone_angle=self.hotspot_angle,
             outer_cone_angle=self.falloff_angle,
             bone_id=self.bone_id,
-            flags=self.flags,
+            flags=int(self.flags),
             lod_distance=self.lod_distance,
             fade_distance=self.fade_distance,
             shadow_fade_distance=self.shadow_fade_distance,
@@ -1116,7 +1181,7 @@ class WdrLight:
             corona_hdr_multiplier=self.corona_hdr_multiplier,
             corona_hash=self.corona_hash,
             luminosity_hash=self.luminosity_hash,
-            flashiness=self.flashiness,
+            flashiness=int(self.flashiness),
             source_type=int(self.light_type),
         )
 
@@ -1832,10 +1897,10 @@ class _WdrReader:
             tangent,
             color,
             *values,
-            flags,
+            WdrLightFlags(flags),
             corona_hash,
             luminosity_hash,
-            flashiness,
+            WdrLightTypeFlags(flashiness),
             light_type,
             corona_hdr_multiplier,
             fade_distance,
@@ -2070,7 +2135,8 @@ __all__ = [
     "WDR_LOD_SIZE", "WDR_MODEL_SIZE", "WDR_RESOURCE_VERSION", "WDR_SHADER_PARAMETER_NAMES",
     "WDR_SHADER_SIZE", "WDR_VERTEX_BUFFER_SIZE", "WDR_VERTEX_LAYOUT_SIZE", "WdrBone",
     "WdrBoneFlags", "WdrBoneId", "WdrDocument", "WdrDrawable", "WdrDrawableLod", "WdrDrawableModel",
-    "WdrGeometry", "WdrIndexBuffer", "WdrLight", "WdrLightType", "WdrLodLevel",
+    "WdrGeometry", "WdrIndexBuffer", "WdrLight", "WdrLightFlags", "WdrLightType",
+    "WdrLightTypeFlags", "WdrLodLevel",
     "WdrPrimitiveType", "WdrShader", "WdrShaderGroup", "WdrShaderParameter", "WdrSkeleton",
     "WdrMatrix4", "WdrTextureReference", "WdrVector2", "WdrVector3", "WdrVector4", "WdrVertex",
     "WdrVertexBuffer", "WdrVertexElement", "WdrVertexElementType", "WdrVertexLayout",
