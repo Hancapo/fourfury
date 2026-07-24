@@ -10,39 +10,59 @@ The changelog is release-oriented and uses a small fixed set of categories:
 ## [0.2.0] - 2026-07-24
 
 ### Added
-- WAD animation-dictionary reading with animation names, hash lookup, flags, track metadata, decoded channels, frame evaluation, and time-based sampling.
-- Support for stock raw, static, quantized, compact, and RLE integer WAD channels, while retaining unsupported channel headers for lossless inspection.
-- Format-neutral arbitrary animation targets, scalar/vector values, sparse frames, interpolation, selected-track streaming, and primitive-data export.
-- Semantic WAD track classification, structured animation and dictionary validation, aggregate audit reports, and explicit reporting for custom track IDs.
-- Target-independent UV transforms, frames, clips, interpolation, coordinate transformation, primitive-data export, and material-slot binding metadata.
-- Typed IDE archetype views and animation flags, including UV-animation dictionary bindings that do not guess clip names.
-- Target-independent skeletal transforms, poses, clips, normalized quaternion interpolation, and separately modeled mover/root-motion tracks.
-- Optional skeletal binding by bone ID with hierarchy, names, indices, skeleton signatures, bind-pose matrices, strict validation, and explicit unresolved targets.
-- Explicit MLO archetypes with typed entities, rooms, portals, bounds, time flags, cross-references, internal LOD parenting, and topology validation.
-- MLO hash registries, WPL placement resolution, world-space entity/room/portal projection, primitive-data export, and lossless editing through IDE records.
+- WAD animation-dictionary reading with animation names, hash lookup, flags, and track metadata.
+- Decoding for stock raw, static, quantized, compact, and RLE integer WAD channels.
+- Lossless inspection and audit reporting for unsupported WAD channel encodings.
+- Frame evaluation and time-based sampling for decoded WAD animations.
+- Format-neutral animation targets, scalar and vector values, sparse frames, and interpolation.
+- Selected-track streaming and primitive-data export for format-independent animation consumers.
+- Semantic WAD track classification with explicit reporting for custom track IDs.
+- Structured WAD animation validation and aggregate dictionary audit reports.
+- Target-independent UV transforms, frames, clips, interpolation, and coordinate transformation.
+- UV-animation material-slot binding metadata without guessed clip names.
+- Typed, editable IDE archetype views.
+- Named IDE archetype animation flags.
+- Neutral WDR default UV transforms shared with the animation API.
+- Target-independent skeletal transforms, poses, and clips.
+- Separately modeled mover and root-motion tracks.
+- Optional skeletal binding by bone ID with hierarchy, names, indices, skeleton signatures, and bind-pose matrices.
+- Strict skeleton validation with explicit unresolved targets in permissive mode.
+- Explicit MLO archetypes with typed entities, rooms, portals, bounds, time flags, and cross-references.
+- Internal MLO LOD parenting and structured topology validation.
+- MLO hash registries and WPL placement resolution.
+- World-space projection for MLO entities, room bounds, and portal corners.
+- Primitive-data export and lossless MLO editing through the original IDE records.
 - Lossless text IPL support with typed GTA IV occlusion boxes.
-- Named layered-terrain shader parameters, drawable-light flags, neutral WDR default UV transforms, and lightweight WBD dictionary-hash inspection.
+- Named layered-terrain shader parameters.
+- Named drawable-light flags.
+- Lightweight WBD dictionary-hash inspection.
 
 ### Changed
 - Reorganized the monolithic WDR parser into the focused `fourfury.wdr` package for constants, math, materials, geometry, scene data, and binary reading.
-- Preserved the complete WDR public API, type identities, pickle compatibility, native-decoder patching, and root-package imports across the module reorganization.
-- WPL section 8 is now modeled explicitly as `WplMloPortal`; `WplStrBig` remains available as a compatibility alias.
+- Preserved the complete WDR public API and root-package imports across the module reorganization.
+- Preserved WDR type identities, pickle compatibility, and native-decoder patching.
+- WPL section 8 is now modeled explicitly as `WplMloPortal`.
+- `WplStrBig` remains available as a compatibility alias.
 - WAD targets are modeled independently from their per-chunk encodings so converters can consume stable logical animation data.
 
 ### Fixed
 - WAD track-group sampling respects the shared boundary frame between adjacent groups.
 - Stock UV-animation dictionary hashes resolve through their base-name and material-slot convention.
 - WAD UV targets are identified explicitly instead of being reported as integer tracks.
-- WAD skeletal targets remain stable when their per-chunk encoding changes, and sampled quaternions now use normalized shortest-path interpolation.
+- WAD skeletal targets remain stable when their per-chunk encoding changes.
+- Sampled skeletal quaternions now use normalized shortest-path interpolation.
 - WAD action-flags tracks are no longer misclassified as bone translations.
 - WAD packed integer sequences decode their unary prefix before the Rice remainder.
 
 ### Performance
-- Bounded IMG resource scanning uses roughly 4× less peak memory, caches logical resource sizes, and skips repeated zlib scans.
+- Bounded IMG resource scanning uses roughly 4× less peak memory.
+- Cached IMG logical resource sizes avoid repeated zlib scans.
 - Atomic streaming IMG and RPF writers use roughly 200× less peak memory when saving large archives.
 - Lazy WAD channel decoding makes large animation dictionaries roughly 40× faster to parse while using about 11× less peak memory.
 - Lazy WDR vertex decoding makes large drawables roughly 2.5× faster to parse while retaining about 1.5× less memory.
-- Indexed animation, skeleton, texture, and track lookups make repeated UV sampling up to 75× faster and texture lookup roughly 55× faster.
+- Indexed animation-frame sampling is up to 75× faster.
+- Indexed texture-name lookup is roughly 55× faster.
+- Indexed skeleton and track metadata avoid repeated lookup allocations.
 
 ## [0.1.0] - 2026-07-22
 
