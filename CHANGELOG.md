@@ -38,11 +38,11 @@ The changelog is release-oriented and uses a small fixed set of categories:
 - WAD packed integer sequences decode their unary prefix before the Rice remainder.
 
 ### Performance
-- Bounded IMG resource-stream scanning and logical-size caching reduce the largest tested stock WTD read peak from 160.58 MiB to 36.46 MiB; repeated reads skip the scan.
-- Atomic streaming IMG and RPF writers avoid retaining every payload in memory; the tested 86.73 MiB IMG save peak drops from 264.64 MiB to 1.35 MiB.
-- Lazy WAD channel decoding reduces the tested 7.86 MiB dictionary parse from 34.86 seconds and 410.60 MiB to 0.87 seconds and 35.86 MiB.
-- Lazy WDR vertex-channel decoding reduces the tested 9.64 MiB drawable parse from 0.231 seconds and 58.97 MiB retained to 0.090 seconds and 39.79 MiB.
-- Indexed animation, skeleton, texture, and track lookups remove repeated temporary allocations; the tested 10,000-frame UV sampling workload drops from 1.50 seconds to 0.020 seconds.
+- Bounded IMG resource scanning uses roughly 4× less peak memory, caches logical resource sizes, and skips repeated zlib scans.
+- Atomic streaming IMG and RPF writers use roughly 200× less peak memory when saving large archives.
+- Lazy WAD channel decoding makes large animation dictionaries roughly 40× faster to parse while using about 11× less peak memory.
+- Lazy WDR vertex decoding makes large drawables roughly 2.5× faster to parse while retaining about 1.5× less memory.
+- Indexed animation, skeleton, texture, and track lookups make repeated UV sampling up to 75× faster and texture lookup roughly 55× faster.
 
 ## [0.1.0] - 2026-07-22
 
