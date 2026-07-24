@@ -11,6 +11,7 @@ The changelog is release-oriented and uses a small fixed set of categories:
 - WAD animation dictionary reading with named track metadata, decoded channels, hash lookup, and frame sampling.
 - Target-independent UV animation clips, affine transforms, sampling, and primitive-data export.
 - Target-independent skeletal poses and clips with explicit mover/root-motion tracks.
+- Optional skeletal-animation binding with hierarchy, skeleton signatures, and bind-pose matrices.
 - Text IPL support with typed GTA IV occlusion boxes.
 - Additional layered-terrain shader metadata, named drawable-light flags, and lightweight WBD hash inspection.
 - Typed IDE archetype animation flags and neutral WDR default UV transforms.

@@ -393,6 +393,18 @@ pelvis = pose.get_bone(417)
 converter_data = clip.to_data()
 ```
 
+Binding is optional. Passing a neutral `ModelSkeleton`, or calling
+`skeleton.bind_animation(clip)`, adds a `SkeletalBoneTarget` for every animated
+bone with its name, skeleton index, parent index, local/world transform, and
+inverse bind matrix. Strict binding rejects signature mismatches and missing
+bones; `strict=False` preserves unresolved targets explicitly:
+
+```python
+model = WdrDocument.from_path("player.wdr").to_model()
+clip = wad["walk"].animation.to_skeletal_animation(skeleton=model.skeleton)
+child = clip.get_target(417)
+```
+
 `to_uv_animation()` projects the two `SHADER_SLIDE_U` and `SHADER_SLIDE_V`
 matrix-row tracks into a format-neutral `UvAnimationClip`. The result contains
 ordered `UvAnimationFrame` objects, supports interpolation through `sample()`,

@@ -20,6 +20,7 @@ from .animation import (
     interpolate_quaternion,
     normalize_quaternion,
 )
+from .model import ModelSkeleton
 from .rsc import (
     RSC5_PHYSICAL_BASE,
     RSC5_VIRTUAL_BASE,
@@ -637,17 +638,27 @@ class WadAnimation:
             ),
         )
 
-    def to_skeletal_animation(self) -> SkeletalAnimationClip:
+    def to_skeletal_animation(
+        self,
+        *,
+        skeleton: ModelSkeleton | None = None,
+        strict: bool = True,
+    ) -> SkeletalAnimationClip:
         """Project every WAD frame into the neutral skeletal contract."""
 
         count = max(self.frame_count, 1)
         frames = tuple(self.skeletal_pose_at(frame) for frame in range(count))
-        return SkeletalAnimationClip(
+        clip = SkeletalAnimationClip(
             name=self.short_name,
             duration=max(self.duration, 0.0),
             looping=bool(self.flags & WadAnimationFlags.LOOPED),
             frames=frames,
             signature=self.signature,
+        )
+        return (
+            clip
+            if skeleton is None
+            else skeleton.bind_animation(clip, strict=strict)
         )
 
     def find_bone(
